@@ -18,6 +18,12 @@
 ## News
 * [04/15/2024] Release the paper and the codebase of MMInA.
 
+## Release Plan
+
+- [ ] More data subsets for multihop tasks
+- [ ] Enhanced arguments design for one-stop usage of MMInA
+- [x] Paper, codebase, and dataset release
+
 ## Installation
 ### Prerequisites
 MMInA is built-off the <a href="https://github.com/web-arena-x/webarena">WebArena environment</a>. The prerequisites are the same as WebArena.
