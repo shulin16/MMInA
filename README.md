@@ -90,7 +90,11 @@ bash prepare.sh
 ```bash
 cd $WORK_DIR
 mkdir WebQA
+<<<<<<< HEAD
 curl -o WebQA/WebQA.zip https://drive.google.com/file/d/1Vf9-g9S5NS5xk53Ye6LFop_IFZm-m27Q/view?usp=drive_link
+=======
+curl -o WebQA/WebQA.zip https://drive.google.com/file/d/1wlJQTR4I2DPuZ6S5pIxTIRnWZJVb5QNU/view?usp=drive_link
+>>>>>>> 7ce7f029a1a8a8dc619ad0e14b2521fed1c7c9ab
 unzip WebQA.zip && rm WebQA.zip
 ```
 
