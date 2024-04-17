@@ -9,7 +9,7 @@
 <p align="center">
 <a href="https://mmina.cliangyu.com/">Project Page</a> |
 <a href="https://arxiv.org/abs/2404.09992">Paper</a> |
-<a href="">Dataset</a>
+<a href="https://drive.google.com/file/d/1Vf9-g9S5NS5xk53Ye6LFop_IFZm-m27Q/view?usp=drive_link">Dataset</a>
 </p>
 
 ![Overview](media/teaser.png)
@@ -90,7 +90,7 @@ bash prepare.sh
 ```bash
 cd $WORK_DIR
 mkdir WebQA
-curl -o WebQA/WebQA.zip https://drive.google.com/file/d/1_2osGFUijmBB0ECmC8-mmO3F-a-_GISN/view?usp=drive_link
+curl -o WebQA/WebQA.zip https://drive.google.com/file/d/1Vf9-g9S5NS5xk53Ye6LFop_IFZm-m27Q/view?usp=drive_link
 unzip WebQA.zip && rm WebQA.zip
 ```
 
