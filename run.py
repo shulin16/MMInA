@@ -531,7 +531,7 @@ if __name__ == "__main__":
     ed_idx = args.test_end_idx
     for i in range(st_idx, ed_idx):
         # test_file_list.append(f"config_files/{i}.json")
-        test_file_list.append(f"WebQA/{args.domain}/{i}.json")
+        test_file_list.append(f"mmina/{args.domain}/{i}.json")
     # test_file_list = get_unfinished(test_file_list, args.result_dir)
     print(f"Total {len(test_file_list)} tasks left")
     print(f"Initial history info: 1. Use history: {args.hist}; 2. History number: {args.hist_num}")
