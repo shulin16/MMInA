@@ -48,8 +48,8 @@ pip install pre-commit
 pre-commit install
 ```
 
-## WebQA Dataset Structure
-The WebQA dataset is a collection of tasks that require long-chain reasoning over multimodal information. The dataset is divided into several subsets, each of which contains tasks with different numbers of hops. The dataset is stored in the following structure:
+## mmina Dataset Structure
+The mmina dataset is a collection of tasks that require long-chain reasoning over multimodal information. The dataset is divided into several subsets, each of which contains tasks with different numbers of hops. The dataset is stored in the following structure:
 
 ``` bash
 Data Root
@@ -73,7 +73,7 @@ Data Root
     ...
 ```
 
-To use the data, you can download the dataset from the WebArena website and unzip it to the `WebQA` folder in the working directory. 
+To use our dataset, which is designed as multimodal web agent tasks, you can download from this [Google Drive link](https://drive.google.com/file/d/1wlJQTR4I2DPuZ6S5pIxTIRnWZJVb5QNU/view?usp=drive_link). Please refer to [this section](##Usage) for detailed instructions for download.
 
 If you want to test different subsets of the dataset, you can specify the subset name in the `domain` argument when running the code. For example, if you want to test the `shopping` subset, you can set the `domain` argument as `shopping`.
 
@@ -90,7 +90,7 @@ bash prepare.sh
 ```bash
 cd $WORK_DIR
 mkdir mmina
-curl -o mmina/mmina.zip https://drive.google.com/file/d/1wlJQTR4I2DPuZ6S5pIxTIRnWZJVb5QNU/view?usp=drive_link
+curl -o mmina.zip https://drive.google.com/file/d/1wlJQTR4I2DPuZ6S5pIxTIRnWZJVb5QNU/view?usp=drive_link
 unzip mmina.zip && rm mmina.zip
 ```
 
