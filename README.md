@@ -1,4 +1,4 @@
-# MMInA: Benchmarking Multihop Multimodal Internet Agents
+![image](https://github.com/shulin16/MMInA/assets/78156099/58fee2c4-a10a-4715-b953-f49db1296830)# MMInA: Benchmarking Multihop Multimodal Internet Agents
 
 <!-- <p align="center">
     <img src="media/logo.png" alt="Logo" width="80px">
@@ -9,7 +9,7 @@
 <p align="center">
 <a href="https://mmina.cliangyu.com/">Project Page</a> |
 <a href="https://arxiv.org/abs/2404.09992">Paper</a> |
-<a href="https://drive.google.com/file/d/1Vf9-g9S5NS5xk53Ye6LFop_IFZm-m27Q/view?usp=drive_link">Dataset</a>
+<a href="https://drive.google.com/file/d/1QBSxTXG3_RXhlUEyWQikqyOEit4deDj6/view?usp=drive_link">Dataset</a>
 </p>
 
 ![Overview](media/teaser.png)
@@ -73,7 +73,7 @@ Data Root
     ...
 ```
 
-To use our dataset, which is designed as multimodal web agent tasks, you can download from this [Google Drive link](https://drive.google.com/file/d/1wlJQTR4I2DPuZ6S5pIxTIRnWZJVb5QNU/view?usp=drive_link). Please refer to [this section](##Usage) for detailed instructions for download.
+To use our dataset, which is designed as multimodal web agent tasks, you can download from this [Google Drive link](https://drive.google.com/file/d/1QBSxTXG3_RXhlUEyWQikqyOEit4deDj6/view?usp=drive_link). Please refer to [this section](##Usage) for detailed instructions for download.
 
 If you want to test different subsets of the dataset, you can specify the subset name in the `domain` argument when running the code. For example, if you want to test the `shopping` subset, you can set the `domain` argument as `shopping`.
 
@@ -90,7 +90,7 @@ bash prepare.sh
 ```bash
 cd $WORK_DIR
 mkdir mmina
-curl -o mmina.zip https://drive.google.com/file/d/1wlJQTR4I2DPuZ6S5pIxTIRnWZJVb5QNU/view?usp=drive_link
+curl -o mmina.zip https://drive.google.com/file/d/1QBSxTXG3_RXhlUEyWQikqyOEit4deDj6/view?usp=drive_link
 unzip mmina.zip && rm mmina.zip
 ```
 
