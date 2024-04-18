@@ -1,4 +1,4 @@
-![image](https://github.com/shulin16/MMInA/assets/78156099/58fee2c4-a10a-4715-b953-f49db1296830)# MMInA: Benchmarking Multihop Multimodal Internet Agents
+# MMInA: Benchmarking Multihop Multimodal Internet Agents
 
 <!-- <p align="center">
     <img src="media/logo.png" alt="Logo" width="80px">
