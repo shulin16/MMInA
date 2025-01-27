@@ -4,8 +4,6 @@
 # re-validate login information
 # mkdir -p ./.auth
 
-conda activate mmina 
-
 export OPENAI_API_KEY=""
 export SHOPPING="http://localhost:7770"
 export SHOPPING_ADMIN="http://localhost:7780/admin"
@@ -24,7 +22,6 @@ sudo docker exec shopping_admin mysql -u magentouser -pMyPassword magentodb -e  
 sudo docker exec shopping_admin /var/www/magento2/bin/magento cache:flush
 
 python browser_env/auto_login.py
-
 
 # sudo docker exec shopping_admin mysql -u admin -p admin1234 -e  'UPDATE core_config_data SET value="http://localhost:7780/" WHERE path = "web/secure/base_url";'
 # export WIKIPEDIA="http://localhost:8888/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"

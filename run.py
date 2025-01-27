@@ -12,28 +12,37 @@ import openai
 import torch
 from beartype import beartype
 
+MMINA_DICT={
+    'normal': 176,
+    'multi567': 180,
+    'compare': 100,
+    'multipro': 86,
+    'shopping': 200,
+    'wikipedia': 308
+}  # total: 1050
+
 # Setup the environment
-os.environ[
-"SHOPPING"
-] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:7770"
-os.environ[
-    "SHOPPING_ADMIN"
-] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:7780/admin"
-os.environ[
-    "REDDIT"
-] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:9999"
-os.environ[
-    "GITLAB"
-] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:8023"
-os.environ[
-    "MAP"
-] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:3000"
-os.environ[
-    "WIKIPEDIA"
-] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:8888/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
-os.environ[
-    "HOMEPAGE"
-] = "PASS"  # The home page is not currently hosted in the demo site
+# os.environ[
+# "SHOPPING"
+# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:7770"
+# os.environ[
+#     "SHOPPING_ADMIN"
+# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:7780/admin"
+# os.environ[
+#     "REDDIT"
+# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:9999"
+# os.environ[
+#     "GITLAB"
+# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:8023"
+# os.environ[
+#     "MAP"
+# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:3000"
+# os.environ[
+#     "WIKIPEDIA"
+# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:8888/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
+# os.environ[
+#     "HOMEPAGE"
+# ] = "PASS"  # The home page is not currently hosted in the demo site
 print("Done setting up URLs")
 
 # from vllm import LLM, SamplingParams
@@ -122,7 +131,7 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--save_dir_sampling",
         type=str,
-        default="/home/data2/stian/MMInA/sampling_data/",
+        default="./cache/sampling_data/",
     ) # Not in use
 
     # agent config
@@ -144,17 +153,17 @@ def config() -> argparse.Namespace:
         type=int,
         default=3,
     )
-    parser.add_argument("--domain", type=str, default="samplesshopping")
+    parser.add_argument("--domain", type=str, default="shopping", choices=['full', 'normal', 'multi567', 'compare', 'multipro', 'shopping', 'wikipedia'])
     parser.add_argument("--hist", type=bool, default=False)
-    parser.add_argument("--hist_fold", type=str, default="/home/data2/stian/MMInA/results_mm/gemini-pro-vision")
+    parser.add_argument("--hist_fold", type=str, default="./cache/history/")
     parser.add_argument("--hist_num", type=int, default=1)
     parser.add_argument("--caption", type=bool, default=False)
-    parser.add_argument("--caption_name", type=str, default="captions.txt")
+    parser.add_argument("--caption_name", type=str, default="./cache/captions.txt")
     parser.add_argument("--cnt1", type=int, default=0)
     parser.add_argument("--cnt2", type=int, default=0)
     # lm config
-    parser.add_argument("--provider", type=str, default="openai")
-    parser.add_argument("--model", type=str, default="gpt-3.5-turbo-0613")
+    parser.add_argument("--provider", type=str, default="custom")
+    parser.add_argument("--model", type=str, default="gpt-4o")
     parser.add_argument("--pt_model", default=None)
     parser.add_argument("--pt_processor", default=None)
     parser.add_argument("--mode", type=str, default="chat")
@@ -273,6 +282,7 @@ def test(
         caption = args.caption,
         caption_name=args.caption_name,
     )
+    # initialize the counter to calculate hsr
     all_pass = 0
     all_all = 0
     for config_file in config_file_list:
@@ -282,6 +292,7 @@ def test(
             )
 
             # get intent
+
             with open(config_file) as f:
                 _c = json.load(f)
                 intent = _c["intent"]
@@ -373,8 +384,6 @@ def test(
                     action = create_stop_action(f"Early stop: {stop_info}")
                 else:
                     try:
-                        folder_path = f"./full_result/{args.cnt1}/{args.cnt2}"
-                        os.makedirs(folder_path, exist_ok=True)
                         if args.provider == "openai":
                             action = agent.next_action(
                                 trajectory, intent, meta_data=meta_data
@@ -457,7 +466,7 @@ def test(
                     Path(args.result_dir) / "traces" / f"{task_id}.zip"
                 )
 
-        except openai.error.OpenAIError as e:
+        except openai.OpenAIError as e:
             logger.info(f"[OpenAI Error] {repr(e)}")
         except Exception as e:
             logger.info(f"[Unhandled Error] {repr(e)}]")
@@ -481,11 +490,17 @@ def prepare(args: argparse.Namespace) -> None:
 
     to_json.run()
 
+    # prepare cache dir
+    cache_dir = "./cache"
+    if not Path(cache_dir).exists():
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        logger.info(f"Create cache dir: {cache_dir}")
+    
     # prepare result dir
     result_dir = args.result_dir
     if not result_dir:
         result_dir = (
-            f"cache/results_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
+            f"cache/results_{time.strftime('%Y%m%d_%H%M%S', time.localtime())}"
         )
     if not Path(result_dir).exists():
         Path(result_dir).mkdir(parents=True, exist_ok=True)
@@ -512,6 +527,13 @@ def get_unfinished(config_files: list[str], result_dir: str) -> list[str]:
             unfinished_configs.append(config_file)
     return unfinished_configs
 
+def is_domain_type(domain, domain_type):
+    domain_map = {
+        'multihop': ['multi567', 'multipro'],
+        '2hop': ['normal', 'compare'],
+        'singlehop': ['shopping', 'wikipedia']
+    }
+    return domain in domain_map.get(domain_type, [])
 
 @beartype
 def dump_config(args: argparse.Namespace) -> None:
@@ -526,15 +548,23 @@ if __name__ == "__main__":
     args = config()
     args.sleep_after_execution = 2.5
     prepare(args)
+    
+    # Prepare test file list
     test_file_list = []
-    st_idx = args.test_start_idx
-    ed_idx = args.test_end_idx
-    for i in range(st_idx, ed_idx):
+    
+    assert args.domain in ['full', 'normal', 'multi567', 'compare', 'multipro', 'shopping', 'wikipedia'], f"Invalid domain {args.domain}"
+    if args.domain == 'full':
+        task_num = 1050
+    else:
+        task_num = MMINA_DICT[args.domain]
+    for i in range(task_num):
         # test_file_list.append(f"config_files/{i}.json")
-        test_file_list.append(f"mmina/{args.domain}/{i}.json")
+        test_file_list.append(f"mmina/{args.domain}/{i+1}.json")
     # test_file_list = get_unfinished(test_file_list, args.result_dir)
-    print(f"Total {len(test_file_list)} tasks left")
-    print(f"Initial history info: 1. Use history: {args.hist}; 2. History number: {args.hist_num}")
+    logger.info(f"Total {len(test_file_list)} tasks left")
+    
+    if args.hist:
+        logger.info(f"Initial history info: 1. Use history: {args.hist}; 2. History number: {args.hist_num}")
     args.render = True
     args.render_screenshot = True
     args.save_trace_enabled = True
@@ -562,8 +592,8 @@ if __name__ == "__main__":
         elif args.model == "WizardLM/WizardCoder-Python-34B-V1.0":
             pt_model = LLM(model=args.model, tensor_parallel_size=n_gpus)
         elif args.model == "codellama-7b":
-            ckpt_dir = "/home/data2/stian/MMInA/models/CodeLlama-7b-Instruct"
-            tokenizer_path = "/home/data2/stian/MMInA/models/CodeLlama-7b-Instruct/tokenizer.model"
+            ckpt_dir = "./models/CodeLlama-7b-Instruct"
+            tokenizer_path = "./models/CodeLlama-7b-Instruct/tokenizer.model"
             max_seq_len = 4096
             max_batch_size = 4
         elif args.model == "fuyu-8b":
@@ -572,7 +602,7 @@ if __name__ == "__main__":
             pass
         elif args.model == "gemini-pro-vision" or args.model == "gemini-pro":
             pass
-        elif args.model == "gpt4" or args.model == "gpt4v":
+        elif "gpt" in args.model:
             pass
         elif args.model =="llava-1.5":
             pass

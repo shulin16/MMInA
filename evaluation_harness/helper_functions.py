@@ -18,6 +18,7 @@ from browser_env.env_config import (
 )
 from llms.providers.openai_utils import (
     generate_from_openai_chat_completion,
+    generate_from_openai_chat_completion_azure,
 )
 
 
@@ -152,6 +153,8 @@ def gitlab_get_project_memeber_role(page: Page, account_name: str) -> str:
 
 @beartype
 def llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
+    
+    use_azure = False
     """Check whether the prediction matches the reference with GPT-3.5"""
     messages: list[dict[str, Any]] = []
     messages.append(
@@ -165,15 +168,27 @@ def llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
         }
     )
 
-    response = generate_from_openai_chat_completion(
-        messages=messages,
-        model="gpt-3.5-turbo",
-        temperature=0,
-        top_p=1,
-        context_length=0,
-        max_tokens=16,
-        stop_token=None,
-    )
+    if use_azure:
+        response = generate_from_openai_chat_completion_azure(
+            messages=messages,
+            model="gpt-4o",
+            temperature=0,
+            top_p=1,
+            context_length=0,
+            max_tokens=16,
+            stop_token=None,
+        )
+    else:
+        response = generate_from_openai_chat_completion(
+            messages=messages,
+            model="gpt-3.5-turbo",
+            temperature=0,
+            top_p=1,
+            context_length=0,
+            max_tokens=16,
+            stop_token=None,
+        )
+    
     if "Yes" in response:
         return 1.0
     else:

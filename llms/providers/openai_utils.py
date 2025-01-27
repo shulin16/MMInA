@@ -10,7 +10,12 @@ from typing import Any
 
 import aiolimiter
 import openai
-import openai.error  # can raise error when version too high, downgrade to openai==0.28.1
+from openai import OpenAI
+client = OpenAI()
+
+# import openai.error  # can raise error when version too high, downgrade to openai==0.28.1
+from openai import AzureOpenAI  
+
 from tqdm.asyncio import tqdm_asyncio
 
 
@@ -20,7 +25,7 @@ def retry_with_exponential_backoff(  # type: ignore
     exponential_base: float = 2,
     jitter: bool = True,
     max_retries: int = 10,
-    errors: tuple[Any] = (openai.error.RateLimitError,),
+    errors: tuple[Any] = (openai.RateLimitError,),
 ):
     """Retry a function with exponential backoff."""
 
@@ -77,12 +82,12 @@ async def _throttled_openai_completion_acreate(
                     max_tokens=max_tokens,
                     top_p=top_p,
                 )
-            except openai.error.RateLimitError:
+            except openai.RateLimitError:
                 logging.warning(
                     "OpenAI API rate limit exceeded. Sleeping for 10 seconds."
                 )
                 await asyncio.sleep(10)
-            except openai.error.APIError as e:
+            except openai.APIError as e:
                 logging.warning(f"OpenAI API error: {e}")
                 break
         return {"choices": [{"message": {"content": ""}}]}
@@ -177,7 +182,7 @@ async def _throttled_openai_chat_completion_acreate(
                     max_tokens=max_tokens,
                     top_p=top_p,
                 )
-            except openai.error.RateLimitError:
+            except openai.RateLimitError:
                 logging.warning(
                     "OpenAI API rate limit exceeded. Sleeping for 10 seconds."
                 )
@@ -185,7 +190,7 @@ async def _throttled_openai_chat_completion_acreate(
             except asyncio.exceptions.TimeoutError:
                 logging.warning("OpenAI API timeout. Sleeping for 10 seconds.")
                 await asyncio.sleep(10)
-            except openai.error.APIError as e:
+            except openai.APIError as e:
                 logging.warning(f"OpenAI API error: {e}")
                 break
         return {"choices": [{"message": {"content": ""}}]}
@@ -236,7 +241,7 @@ async def agenerate_from_openai_chat_completion(
 
 
 @retry_with_exponential_backoff
-def generate_from_openai_chat_completion(
+def generate_from_openai_chat_completion_deprecated(
     messages: list[dict[str, str]],
     model: str,
     temperature: float,
@@ -260,6 +265,69 @@ def generate_from_openai_chat_completion(
         stop=[stop_token] if stop_token else None,
     )
     answer: str = response["choices"][0]["message"]["content"]
+    return answer
+
+@retry_with_exponential_backoff
+def generate_from_openai_chat_completion(
+    messages: list[dict[str, str]],
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    top_p: float,
+    context_length: int,
+    stop_token: str | None = None,
+) -> str:
+    if "OPENAI_API_KEY" not in os.environ:
+        raise ValueError(
+            "OPENAI_API_KEY environment variable must be set when using OpenAI API."
+        )
+    # openai.api_key = os.environ["OPENAI_API_KEY"]
+
+    response = client.chat.completions.create(  # type: ignore
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        top_p=top_p,
+        stop=[stop_token] if stop_token else None,
+    )
+    answer: str = response.choices[0].message.content
+    return answer
+
+@retry_with_exponential_backoff
+def generate_from_openai_chat_completion_azure(
+    messages: list[dict[str, str]],
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    top_p: float,
+    context_length: int,
+    stop_token: str | None = None,
+) -> str:
+    if "AZURE_OPENAI_API_KEY" not in os.environ:
+        raise ValueError(
+            "AZURE_OPENAI_API_KEY environment variable must be set when using OpenAI API."
+        )
+    
+    endpoint = os.getenv("ENDPOINT_URL")  
+    model = os.getenv("MODEL_NAME")  
+    subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
+    
+    client = AzureOpenAI(  
+        azure_endpoint=endpoint,  
+        api_key=subscription_key,  
+        api_version="2024-05-01-preview",  
+    )
+
+    response = client.chat.completions.create(  # type: ignore
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        top_p=top_p,
+        stop=[stop_token] if stop_token else None,
+    )
+    answer: str = response.choices[0].message.content
     return answer
 
 

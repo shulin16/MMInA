@@ -7,7 +7,7 @@ import urllib
 from pathlib import Path
 from typing import Any, Tuple, Union
 
-import evaluate  # type: ignore[import]
+# import evaluate  # type: ignore[import]
 from beartype import beartype
 from beartype.door import is_bearable
 from playwright.sync_api import CDPSession, Page
@@ -404,7 +404,6 @@ class TripEvaluator(EvaluatorPartial):
                     for reference in value:
                         fuzzy_score = llm_fuzzy_match(pred, reference, intent)
                         score = score * fuzzy_score
-                        
 
         return score
 
@@ -440,14 +439,11 @@ def evaluator_router(config_file: Path | str) -> EvaluatorComb:
     # print("this is liangyu")
     with open(config_file, "r") as f:
         configs = json.load(f)
-    # print("this is liangyu")
     
     eval_types = configs["eval"]["eval_types"]
     
-    # print("this is liangyu")
     
     evaluators: list[Evaluator | EvaluatorPartial] = []
-    # print("this is liangyu")
     
     for eval_type in eval_types:
         match eval_type:
@@ -458,9 +454,7 @@ def evaluator_router(config_file: Path | str) -> EvaluatorComb:
             case "program_html":
                 evaluators.append(HTMLContentExactEvaluator())
             case "trip_match":
-                print("this is liangyu")
                 evaluators.append(TripEvaluator())
-                print("this is liangyu2")
             case _:
                 raise ValueError(f"eval_type {eval_type} is not supported")
 

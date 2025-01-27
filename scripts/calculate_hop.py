@@ -15,7 +15,7 @@ def read_lines_with_pattern(file_path, pattern):
         print(f"An error occurred: {str(e)}")
 
 # Example usage:
-file_path = '/home/data2/stian/webarena/output_gpv_mh.txt'  # Replace with the path to your .txt file
+file_path = './output_gpv_mh.txt'  # Replace with the path to your .txt file
 pattern = "INFO - [Result] (PASS) "
 
 matching_lines = read_lines_with_pattern(file_path, pattern)
