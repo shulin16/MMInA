@@ -19,7 +19,6 @@
 * [04/15/2024] Release the paper and the codebase of MMInA.
 
 ## Release Plan
-
 - [ ] More data subsets for multihop tasks
 - [x] Enhanced arguments design for one-stop usage of MMInA
 - [x] Paper, codebase, and dataset release
@@ -51,26 +50,27 @@ pre-commit install
 ## mmina Dataset Structure
 The mmina dataset is a collection of tasks that require long-chain reasoning over multimodal information. The dataset is divided into several subsets, each of which contains tasks with different numbers of hops. The dataset is stored in the following structure:
 
+(❗️Note: The subfolders' names are the `domain` argument in the `run.py` script.)
 ``` bash
-Data Root
-└── normal/ # All of them are 2-hop tasks.
+mmina/
+└── shopping/ # 1 hop: All tasks here are about items in OneStopMarket
     └── x.json
-    ...
-└── multi567/ # All 5-hop, 6-hop, 7-hop tasks are here.
+
+└── wikipedia/ # 1 hop: All tasks here are limited in wikipedia.
     └── x.json
-    ...
-└── compare/ # All tasks in this folder need to answer a comparable question first.
+
+└── normal/ # 2 hop: All tasks here are 2-hop tasks.
     └── x.json
-    ...
-└── multipro/ # All 8-hop, 9-hop, 10-hop tasks are here.
+
+└── compare/ # 3-4 hop: All tasks in this folder need to answer a comparable question first.
     └── x.json
-    ...
-└── shopping/ # All tasks here are about items in OneStopMarket
+
+└── multi567/ # 5-7 hop: All 5-hop, 6-hop, 7-hop tasks are here.
     └── x.json
-    ...
-└── wikipedia/ # All tasks here are limited in wikipedia.
+
+└── multipro/ # 8-10 hop: All 8-hop, 9-hop, 10-hop tasks are here.
     └── x.json
-    ...
+
 ```
 
 To use our dataset, which is designed as multimodal web agent tasks, you can download from this [Google Drive link](https://drive.google.com/file/d/1QBSxTXG3_RXhlUEyWQikqyOEit4deDj6/view?usp=drive_link). Please refer to [this section](##Usage) for detailed instructions for download.
