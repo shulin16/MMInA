@@ -66,7 +66,7 @@ def image_unifier(img_url: str, idx: int):
             # Save the PNG image to a file
             png_img = Image.open(BytesIO(png_img))
             png_file_path = (
-                "/home/data2/stian/MMInA/sampling_data/imgs_caption/" + str(idx) + ".png"
+                "./caption/" + str(idx) + ".png"
             )
             png_img.save(png_file_path)
             img_url = png_file_path
@@ -90,7 +90,7 @@ def merge_img(img_urls: list, text: list, save_pth: str):
         images.append(image)
     print(images)
     font_size = 120
-    font = ImageFont.truetype("/home/data2/stian/MMInA/aibrowser/Times New Roman.ttf", font_size)
+    font = ImageFont.truetype("./browser_env/Arial.ttf", font_size)
     # Assuming `images` is your list of Image objects
     text_heights = [int(ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength(txt, font=font)) for txt in text]
     max_text_height = max(text_heights)
@@ -149,7 +149,7 @@ class TextObervationProcessor(ObservationProcessor):
             self.blip_model.to(self.device)
             print("```````````````This method use Blip to caption, Done Blip Model````````````````")
             # Save caption
-            root = "/home/data2/stian/MMInA/sampling_data/caption/"
+            root = "./cache/caption/"
             self.full_file_path = os.path.join(root, self.caption_name)
             # Check if the file already exists, and if so, delete it
             if os.path.exists(self.full_file_path):
@@ -173,12 +173,10 @@ class TextObervationProcessor(ObservationProcessor):
             },
         )
 
-        print("*********************************************")
         tree_json = json.dumps(tree, indent=2)
         with open("tree.json", "w") as file:
             file.write(tree_json)
         print("Done tree fetch")
-        print("*********************************************")
 
         # calibrate the bounds, in some cases, the bounds are scaled somehow
         bounds = tree["documents"][0]["layout"]["bounds"]
@@ -212,13 +210,11 @@ class TextObervationProcessor(ObservationProcessor):
         # assert len(tree['documents']) == 1, "More than one document in the DOM tree"
         info: BrowserInfo = {"DOMTree": tree, "config": config}
 
-        print("***************************************")
         html_content = page.content()
         # Save the HTML content to a file
         with open("page.html", "w", encoding="utf-8") as f:
             f.write(html_content)
         print("Done page fetch")
-        print("***************************************")
         return info
 
     @beartype
@@ -395,7 +391,6 @@ class TextObervationProcessor(ObservationProcessor):
             "Accessibility.getFullAXTree", {}
         )["nodes"]
 
-        print("```````````````````````````````````````````````")
         accessibility_tree_json = json.dumps(accessibility_tree, indent=4)
         with open("accessibility_tree.json", "w", encoding="utf-8") as file:
             file.write(accessibility_tree_json)
@@ -749,7 +744,7 @@ class TextObervationProcessor(ObservationProcessor):
         return "\n".join(clean_lines)
 
     @beartype
-    def process(self, page: Page, client: CDPSession, cnt1: int, cnt2:int) -> str:
+    def process(self, page: Page, client: CDPSession, task_cnt: int, hop_cnt:int) -> str:
         # get the tab info
         open_tabs = page.context.pages
         try:
@@ -828,7 +823,7 @@ class TextObervationProcessor(ObservationProcessor):
                         png_img = cairosvg.svg2png(bytestring=response.content)  # png_data
                         # Save the PNG image to a file
                         image = Image.open(BytesIO(png_img)).convert('RGB')
-                        # png_file_path = ("/home/data2/stian/MMInA/sampling_data/imgs_caption/" + str(idx) + ".png")
+                        # png_file_path = ("./sampling_data/imgs_caption/" + str(idx) + ".png")
                     else:
                         image = Image.open(requests.get(img_url, stream=True).raw).convert('RGB')
                 '''
@@ -848,7 +843,7 @@ class TextObervationProcessor(ObservationProcessor):
                         # add caption to the image
                         draw = ImageDraw.Draw(image)
                         # Specify the font, size, and color
-                        font = ImageFont.truetype(r"/home/data2/stian/MMInA/browser_env/Arial.ttf", 15)
+                        font = ImageFont.truetype(r"./browser_env/Arial.ttf", 15)
                         text_color = (237, 230, 211)  # RGB
                         # Calculate the width of the text and the width of the image
                         text_width = draw.textlength(generated_text, font=font)
@@ -858,27 +853,18 @@ class TextObervationProcessor(ObservationProcessor):
                         draw.text(text_position, generated_text, font=font, fill=text_color)
                         
                         # Save the image with the caption
-                        file_path = "/home/data2/stian/MMInA/sampling_data/imgs_caption/" + str(idx) + ".png"
+                        file_path = "./cache/caption/" + str(idx) + ".png"
                         image.save(file_path)
                         print("************Done save captioned image *****************")
                     except:
                         generated_text = "\nCurrent webpage has no image provided, please refer to the webpage content for more information.\n"
 
                     
-                    # Save caption
-                    # root = "/home/data2/stian/MMInA/sampling_data/caption/"
-                    # file_name = self.caption_name
-                    # full_file_path = os.path.join(root, file_name)
-                    # # Check if the file already exists, and if so, delete it
-                    # if os.path.exists(full_file_path):
-                    #     os.remove(full_file_path)
-                    # # Ensure the directory exists
-                    # os.makedirs(os.path.dirname(full_file_path), exist_ok=True)
                     
                     with open(self.full_file_path, "a") as f:
                         f.write(generated_text + "\n")
             
-                    print(f"```````````````Done Captioning: {generated_text}````````````````")
+                    print(f"Done Captioning: {generated_text}")
                     
 
                 
@@ -895,7 +881,7 @@ class TextObervationProcessor(ObservationProcessor):
                 )
 
         dfs(0, accessibility_tree[0]["nodeId"], 0, 0)
-        # merge_img(img_urls, text, "/home/data2/stian/MMInA/sampling_data/imgs_gemini/output_img.jpg")
+        # merge_img(img_urls, text, "./sampling_data/imgs_gemini/output_img.jpg")
         print(img_urls)
         # imgs = MergeImage()
         # imgs.merge(img_urls,text)  #TODO: cannot identify image file
@@ -938,7 +924,7 @@ class TextObervationProcessor(ObservationProcessor):
                     print(f"Failed to download {img_url}: {e}")
 
 
-        folder = "/home/data2/stian/MMInA/imgbin"
+        folder = "./imgbin"
         download_images(img_urls, folder)
         self.browser_config = browser_info["config"]
         content = f"{tab_title_str}\n\n{content}"
@@ -1027,9 +1013,9 @@ class ObservationHandler:
 
     @beartype
     def get_observation(
-        self, page: Page, client: CDPSession, cnt1: int, cnt2:int
+        self, page: Page, client: CDPSession, task_cnt: int, hop_cnt:int
     ) -> dict[str, Observation]:
-        text_obs = self.text_processor.process(page, client, cnt1,cnt2)
+        text_obs = self.text_processor.process(page, client, task_cnt,hop_cnt)
         image_obs = self.image_processor.process(page, client) # screenshot of the weboage
         return {"text": text_obs, "image": image_obs, "current_url": page.url} 
 

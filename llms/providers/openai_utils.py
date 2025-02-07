@@ -11,7 +11,7 @@ from typing import Any
 import aiolimiter
 import openai
 from openai import OpenAI
-client = OpenAI()
+
 
 # import openai.error  # can raise error when version too high, downgrade to openai==0.28.1
 from openai import AzureOpenAI  
@@ -282,7 +282,7 @@ def generate_from_openai_chat_completion(
             "OPENAI_API_KEY environment variable must be set when using OpenAI API."
         )
     # openai.api_key = os.environ["OPENAI_API_KEY"]
-
+    client = OpenAI()
     response = client.chat.completions.create(  # type: ignore
         model=model,
         messages=messages,

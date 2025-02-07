@@ -138,6 +138,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         # # Async version
         # self.context_manager = async_playwright()
         # self.playwright = self.context_manager.__aenter__()
+        
         self.browser = self.playwright.chromium.launch(
             headless=self.headless, slow_mo=self.slow_mo
         )

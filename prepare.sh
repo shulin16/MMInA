@@ -2,8 +2,10 @@
 
 # prepare the evaluation
 # re-validate login information
-# mkdir -p ./.auth
-
+mkdir -p ./.auth
+HOME_DIR="./MMInA"
+PYTHONPATH="$HOME_DIR:$PYTHONPATH"
+export PYTHONPATH
 export OPENAI_API_KEY=""
 export SHOPPING="http://localhost:7770"
 export SHOPPING_ADMIN="http://localhost:7780/admin"

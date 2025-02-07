@@ -21,35 +21,11 @@ MMINA_DICT={
     'wikipedia': 308
 }  # total: 1050
 
-# Setup the environment
-# os.environ[
-# "SHOPPING"
-# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:7770"
-# os.environ[
-#     "SHOPPING_ADMIN"
-# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:7780/admin"
-# os.environ[
-#     "REDDIT"
-# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:9999"
-# os.environ[
-#     "GITLAB"
-# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:8023"
-# os.environ[
-#     "MAP"
-# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:3000"
-# os.environ[
-#     "WIKIPEDIA"
-# ] = "http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:8888/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
-# os.environ[
-#     "HOMEPAGE"
-# ] = "PASS"  # The home page is not currently hosted in the demo site
 print("Done setting up URLs")
 
 # from vllm import LLM, SamplingParams
-from models.llama import Llama
+from transformers import AutoModelForCausalLM
 
-# Custom model imports
-# from models.otter.modeling_otter import OtterForConditionalGeneration
 
 from agent import (
     Agent,
@@ -75,7 +51,7 @@ from evaluation_harness import evaluator_router
 
 LOG_FOLDER = "log_files"
 Path(LOG_FOLDER).mkdir(parents=True, exist_ok=True)
-LOG_FILE_NAME = f"{LOG_FOLDER}/log_{time.strftime('%Y%m%d%H%M%S', time.localtime())}_{random.randint(0, 10000)}.log"
+LOG_FILE_NAME = f"{LOG_FOLDER}/log_{time.strftime('%Y%m%d%H%M%S', time.localtime())}_{str(random.randint(0, 9999)).zfill(4)}.log"
 
 logger = logging.getLogger("logger")
 logger.setLevel(logging.INFO)
@@ -129,9 +105,9 @@ def config() -> argparse.Namespace:
     parser.add_argument("--max_steps", type=int, default=30)
 
     parser.add_argument(
-        "--save_dir_sampling",
+        "--imgbin_dir",
         type=str,
-        default="./cache/sampling_data/",
+        default="./cache/imgbin/",
     ) # Not in use
 
     # agent config
@@ -154,23 +130,23 @@ def config() -> argparse.Namespace:
         default=3,
     )
     parser.add_argument("--domain", type=str, default="shopping", choices=['full', 'normal', 'multi567', 'compare', 'multipro', 'shopping', 'wikipedia'])
-    parser.add_argument("--hist", type=bool, default=False)
+    parser.add_argument("--hist", action='store_true', default=False)
     parser.add_argument("--hist_fold", type=str, default="./cache/history/")
     parser.add_argument("--hist_num", type=int, default=1)
-    parser.add_argument("--caption", type=bool, default=False)
-    parser.add_argument("--caption_name", type=str, default="./cache/captions.txt")
-    parser.add_argument("--cnt1", type=int, default=0)
-    parser.add_argument("--cnt2", type=int, default=0)
+    parser.add_argument("--caption", action='store_true', default=False)
+    parser.add_argument("--caption_name", type=str, default="captions.txt")
+    parser.add_argument("--task_cnt", type=int, default=0)
+    parser.add_argument("--hop_cnt", type=int, default=0)
     # lm config
     parser.add_argument("--provider", type=str, default="custom")
     parser.add_argument("--model", type=str, default="gpt-4o")
-    parser.add_argument("--pt_model", default=None)
-    parser.add_argument("--pt_processor", default=None)
+    parser.add_argument("--loaded_tokenizer", default=None)
+    parser.add_argument("--loaded_model", default=None)
     parser.add_argument("--mode", type=str, default="chat")
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=0.9)
     parser.add_argument("--context_length", type=int, default=0)
-    parser.add_argument("--max_tokens", type=int, default=800)
+    parser.add_argument("--max_tokens", type=int, default=500)
     parser.add_argument("--stop_token", type=str, default=None)
     parser.add_argument(
         "--max_obs_length",
@@ -243,7 +219,6 @@ def early_stop(
                 ]
             ):
                 return True, f"Same action for {k} times"
-
     else:
         # check the action sequence
         if (
@@ -300,18 +275,16 @@ def test(
                 # hop_cnt = _c["hop_cnt"]
 
             numbers = re.findall(r'\d+',config_file)
-            args.cnt1 = int(numbers[0]) if numbers else None
-            folder_path = f"./full_result/{args.cnt1}"
-            args.cnt2 = 0
+            args.task_cnt = int(numbers[0]) if numbers else None
+            args.hop_cnt = 0
             
-            os.makedirs(folder_path,exist_ok=True)
             logger.info(f"[Config file]: {config_file}")
             logger.info(f"[Intent]: {intent}")
 
             agent.reset(config_file)
             trajectory: Trajectory = []
             obs, info = env.reset(
-                options={"config_file": config_file}, cnt1=args.cnt1, cnt2=args.cnt2
+                options={"config_file": config_file}, task_cnt=args.task_cnt, hop_cnt=args.hop_cnt
             )  # file path -> json file of webstate
             state_info: StateInfo = {"observation": obs, "info": info, "current_url": obs["current_url"]}
             # print("State info: ", state_info)
@@ -328,53 +301,72 @@ def test(
             
             cnt_ans = 0
             
-            ## 2hop implementations
-            cnt_cl = 2
-            with open (config_file,"r") as file:
-                data = json.load(file)
-                reference = data['eval']['reference_answers']['must_include']
-            nxt = reference[0]
-            
-            all_all = all_all + cnt_cl
+            if is_domain_type(args.domain, '2hop'):
+                ## 2hop implementations
+                cnt_cl = 2
+                with open (config_file,"r") as file:
+                    data = json.load(file)
+                    reference = data['eval']['reference_answers']['must_include']
+                nxt = reference[0]
+            elif is_domain_type(args.domain, 'multihop'):
+                ## Multihop implementations
+                with open (config_file,"r") as file:
+                    data = json.load(file)
+                    check_list = data['procedure']
+                    city = data['city']
+                    flight = data['flight']
+                    shop = data['shop']
+                cnt_cl = len(check_list)
+                # print("cccckkkkpppttt-multihop")
+            elif is_domain_type(args.domain, 'singlehop'):
+                cnt_cl = 1
+
+            # calculate sum of total hop numbers of all tasks
+            all_all += cnt_cl
             
             flag = True
             all_view_url = []
             
             meta_data = {"action_history": ["None"]}
+
+
             while True:
                 current_url = current_url.lower()
                 all_view_url.append(current_url)
-                now_url = check_list[cnt_ans]
-                if flag:
-                    if "kiwix" not in current_url and current_url!=None and "kiwix" in now_url and check_list[cnt_ans+1] in current_url:
-                        cnt_ans = cnt_ans + 1
-                        flag = False
-                    if "momondo" in current_url and "momondo" in now_url:
-                        if flight in current_url:
-                            cnt_ans = cnt_ans + 1
-                    if "7770" in current_url and "7770" in now_url:
-                        if shop in current_url:
-                            cnt_ans = cnt_ans + 1
-                    if now_url in current_url:
-                        if " " in city:
-                            fro,en = city.split(" ")
-                            if fro in current_url and en in current_url:
-                                cnt_ans = cnt_ans + 1
-                        else:
-                            if city in current_url:
-                                cnt_ans = cnt_ans +1
-                print("ckpt1")
-                
-                if "kiwix" not in current_url and nxt in current_url:
+
+                # if multihop tasks: check whether the current url is the last url in the check_list
+                if is_domain_type(args.domain, '2hop'):
+                    if "kiwix" not in current_url and nxt in current_url:
+                        if flag:
+                            cnt_ans = cnt_ans+1
+                            flag = False
+                    fg = True
+                    for item in reference:
+                        item=item.lower()
+                        if item not in current_url:
+                            fg= False
+                    if fg and cnt_ans == 1: cnt_ans = 2
+
+                elif is_domain_type(args.domain, 'multihop'):
+                    now_url = check_list[cnt_ans]
                     if flag:
-                        cnt_ans = cnt_ans+1
-                        flag = False
-                fg = True
-                for item in reference:
-                    item=item.lower()
-                    if item not in current_url:
-                        fg= False
-                if fg and cnt_ans == 1: cnt_ans = 2
+                        if "kiwix" not in current_url and current_url!=None and "kiwix" in now_url and check_list[cnt_ans+1] in current_url:
+                            cnt_ans = cnt_ans + 1
+                            flag = False
+                        if "momondo" in current_url and "momondo" in now_url:
+                            if flight in current_url:
+                                cnt_ans = cnt_ans + 1
+                        if "7770" in current_url and "7770" in now_url:
+                            if shop in current_url:
+                                cnt_ans = cnt_ans + 1
+                        if now_url in current_url:
+                            if " " in city:
+                                fro,en = city.split(" ")
+                                if fro in current_url and en in current_url:
+                                    cnt_ans = cnt_ans + 1
+                            else:
+                                if city in current_url:
+                                    cnt_ans = cnt_ans +1
                 
                 early_stop_flag, stop_info = early_stop(
                     trajectory, max_steps, early_stop_thresholds
@@ -388,7 +380,7 @@ def test(
                             action = agent.next_action(
                                 trajectory, intent, meta_data=meta_data
                             )
-                            args.cnt2 = args.cnt2 + 1
+                            args.hop_cnt = args.hop_cnt + 1
                         elif args.provider == "custom":
                             action = agent.next_action_custom(
                                 trajectory,
@@ -397,7 +389,7 @@ def test(
                                 model=args.pt_model,
                                 args=args,
                             )
-                            args.cnt2 = args.cnt2 + 1
+                            args.hop_cnt = args.hop_cnt + 1
                         else:
                             raise NotImplementedError(
                                 f"Provider {args.provider} not implemented"
@@ -425,7 +417,7 @@ def test(
                 if action["action_type"] == ActionTypes.STOP:
                     break
 
-                obs, _, terminated, _, info, current_url = env.step(action, args.cnt1, args.cnt2)
+                obs, _, terminated, _, info, current_url = env.step(action, args.task_cnt, args.hop_cnt)
                 print("CURRENT: ",current_url)
                 state_info = {"observation": obs, "info": info}
                 trajectory.append(state_info)
@@ -434,9 +426,10 @@ def test(
                     # add a action place holder
                     trajectory.append(create_stop_action(""))
                     break
-            all_pass = all_pass + cnt_ans
+            all_pass += cnt_ans
 
-            logger.info(f"[Result] success rate: {cnt_ans}/{cnt_cl}")
+            if is_domain_type(args.domain, 'multihop'):
+                logger.info(f"[Result] single task success rate: {cnt_ans}/{cnt_cl}")
             
             evaluator = evaluator_router(config_file)
             score = evaluator(
@@ -447,19 +440,44 @@ def test(
             )
 
             scores.append(score)
-                
-            # if check_list[cnt_ans]=="end":
-            if cnt_ans==2:
-                logger.info(f"[Result] (PASS) {config_file}")
+            '''
+            
+            criteria = {
+                'shopping': lambda: score == 1,
+                'wikipedia': lambda: score == 1,
+                'normal': lambda: cnt_ans == 2,
+                'compare': lambda: cnt_ans == 2,
+                'multi567': lambda: check_list[cnt_ans] == "end",
+                'multipro': lambda: check_list[cnt_ans] == "end"
+            }
+            if domain in criteria:
+                result = "PASS" if criteria[domain]() else "FAIL"
+                logger.info(f"[Result] ({result}) {config_file}")
             else:
-                logger.info(f"[Result] (FAIL) {config_file}")
-
+                raise NotImplementedError(f"Domain {domain} not implemented")
+            
             if args.save_trace_enabled:
                 env.save_trace(
                     Path(args.result_dir) / "traces" / f"{task_id}.zip"
                 )
-         
-            print(f"Current score: {sum(scores) / len(scores)}")
+            '''
+            
+            conditions = {
+                'singlehop': lambda: score == 1,
+                '2hop': lambda: cnt_ans == 2,
+                'multihop': lambda: check_list[cnt_ans] == "end"
+            }
+            
+            for domain_type, check in conditions.items():
+                if is_domain_type(args.domain, domain_type):
+                    result = "PASS" if check() else "FAIL"
+                    logger.info(f"[Result] ({result}) {config_file}")
+                    break
+            else:
+                raise NotImplementedError(f"Domain {args.domain} not implemented")
+            
+            
+            logger.info(f"[Result] Current score: {sum(scores) / len(scores)}")
             
             if args.save_trace_enabled:
                 env.save_trace(
@@ -490,17 +508,34 @@ def prepare(args: argparse.Namespace) -> None:
 
     to_json.run()
 
+    datetime = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     # prepare cache dir
     cache_dir = "./cache"
     if not Path(cache_dir).exists():
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
         logger.info(f"Create cache dir: {cache_dir}")
     
+    # prepare imgbin dir
+    args.imgbin_dir = os.path.join(cache_dir, f"imgbin_{datetime}")
+    if not Path(args.imgbin_dir).exists():
+        Path(args.imgbin_dir).mkdir(parents=True, exist_ok=True)
+        os.environ["IMG_BIN_DIR"] = args.imgbin_dir
+        logger.info(f"Create imgbin dir: {args.imgbin_dir}")
+    
+    # prepare history dir if use history
+    if args.hist:
+        args.hist_fold = os.path.join(cache_dir, f"history_{args.model}_{datetime}")
+        hist_fold = args.hist_fold
+        if not Path(hist_fold).exists():
+            Path(hist_fold).mkdir(parents=True, exist_ok=True)
+            os.environ["HIST_DIR"] = args.hist_fold
+            logger.info(f"Create history dir: {hist_fold}")
+    
     # prepare result dir
     result_dir = args.result_dir
     if not result_dir:
         result_dir = (
-            f"cache/results_{time.strftime('%Y%m%d_%H%M%S', time.localtime())}"
+            f"cache/results_{datetime}_{args.model}_{args.domain}"
         )
     if not Path(result_dir).exists():
         Path(result_dir).mkdir(parents=True, exist_ok=True)
@@ -527,10 +562,10 @@ def get_unfinished(config_files: list[str], result_dir: str) -> list[str]:
             unfinished_configs.append(config_file)
     return unfinished_configs
 
-def is_domain_type(domain, domain_type):
+def is_domain_type(domain, domain_type) -> bool:
     domain_map = {
-        'multihop': ['multi567', 'multipro'],
-        '2hop': ['normal', 'compare'],
+        'multihop': ['compare', 'multi567', 'multipro'],
+        '2hop': ['normal'],
         'singlehop': ['shopping', 'wikipedia']
     }
     return domain in domain_map.get(domain_type, [])
@@ -564,48 +599,26 @@ if __name__ == "__main__":
     logger.info(f"Total {len(test_file_list)} tasks left")
     
     if args.hist:
-        logger.info(f"Initial history info: 1. Use history: {args.hist}; 2. History number: {args.hist_num}")
+        logger.info(f"Initial history info: Use history: {args.hist} | History number: {args.hist_num}")
     args.render = True
     args.render_screenshot = True
     args.save_trace_enabled = True
 
     if args.provider == "custom":
-        if args.model == "otter-7b":
-            # import otter
-            load_bit = "bf16"
-            precision = {}
-            if load_bit == "bf16":
-                precision["torch_dtype"] = torch.bfloat16
-            elif load_bit == "fp16":
-                precision["torch_dtype"] = torch.float16
-            elif load_bit == "fp32":
-                precision["torch_dtype"] = torch.float32
-            pt_model = OtterForConditionalGeneration.from_pretrained(
-                "luodian/OTTER-Image-MPT7B",
-                device_map="sequential",
-                **precision,
-            )
-            pt_model.to(torch.device("cuda"))
-            pt_model.lang_encoder.config.init_device = "cuda"
-            pt_model.text_tokenizer.padding_side = "left"
-            args.pt_model = pt_model
-        elif args.model == "WizardLM/WizardCoder-Python-34B-V1.0":
-            pt_model = LLM(model=args.model, tensor_parallel_size=n_gpus)
-        elif args.model == "codellama-7b":
-            ckpt_dir = "./models/CodeLlama-7b-Instruct"
-            tokenizer_path = "./models/CodeLlama-7b-Instruct/tokenizer.model"
-            max_seq_len = 4096
-            max_batch_size = 4
-        elif args.model == "fuyu-8b":
+        # add your customized model here
+        if args.model == "your_customized_model":
+            # add specific initialization here
             pass
-        elif args.model == "webshop":
-            pass
-        elif args.model == "gemini-pro-vision" or args.model == "gemini-pro":
-            pass
-        elif "gpt" in args.model:
-            pass
-        elif args.model =="llava-1.5":
-            pass
+        elif args.model == "cogagent-9b":
+            args.loaded_model = AutoModelForCausalLM.from_pretrained(
+                        os.environ["HF_MODEL_ID"],
+                        torch_dtype=torch.bfloat16,
+                        trust_remote_code=True,
+                        device_map="auto",
+                        # quantization_config=BitsAndBytesConfig(load_in_8bit=True), # For INT8 quantization
+                        # quantization_config=BitsAndBytesConfig(load_in_4bit=True), # For INT4 quantization
+                    ).eval()
+            
         else:
             raise NotImplementedError(f"model {args.model} not implemented")
 
@@ -615,3 +628,4 @@ if __name__ == "__main__":
     agent = construct_agent(args)
     print(test_file_list)
     test(args, agent, test_file_list)
+    logger.info(f"Test finished. Log file: {LOG_FILE_NAME}")
