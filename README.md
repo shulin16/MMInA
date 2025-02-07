@@ -21,7 +21,7 @@
 ## Release Plan
 
 - [ ] More data subsets for multihop tasks
-- [ ] Enhanced arguments design for one-stop usage of MMInA
+- [x] Enhanced arguments design for one-stop usage of MMInA
 - [x] Paper, codebase, and dataset release
 
 ## Installation
@@ -95,39 +95,48 @@ unzip mmina.zip && rm mmina.zip
 ```
 
 #### 3. Test the developed agents
-If you want to try agents without history memories:
+If you want to try the developed agents w/o history memories, for example, `cogagent-9b`:
 ```bash
-CUDA_VISIBLE_DEVICES=0 python run.py \
---test_start_idx 1 --test_end_idx 10 \
---provider custom --model MODEL_NAME \
---domain DOMAIN_NAME \
---result_dir RESULT_DIR 
+export HF_MODEL_ID="THUDM/cogagent-9b-20241220"
+
+python run.py \
+--model cogagent-9b \
+--domain shopping \ # [shopping, wikipedia, normal, compare, multi567, multipro]
+--result_dir "results/"
+# or
+bash run.sh
 ```
 
-If you want to try agents with history memories, you have to set the `hist` tag as `True`, and specify the history number and the history folder where the history data is stored. Usually
+If you want to try agents with history memories, you have to set the `--hist`, and specify the history number `--hist_num` you want your agent to retrieve
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python run.py \
---test_start_idx 1 --test_end_idx 10 \
---provider custom --model MODEL_NAME \
---domain DOMAIN_NAME \
---result_dir RESULT_DIR \
---hist True --hist_num NUM --hist_fold HIST_FOLDER
+python run.py \
+--model cogagent-9b \
+--domain shopping \ 
+--result_dir "results/" \
+--hist \
+--hist_num 1 # (1, 2, 3, 4, 50
 ```
 
 #### 4. Test your own agents
-You can also implement customized LLMs or VLMs as agents to test out the long-chain reasoning ability of the models. After downloading the model weights, the agents should be implemented in [`agent.py`](agent/agent.py) under `agent/` folder. 
+You can also implement customized LLMs or VLMs as agents to test out the long-chain reasoning ability of the models. The agents should be implemented in [`agent.py`](agent/agent.py) under `agent/` folder by searching for `your_customized_model` tag. 
 
-Remeber to initializa a new agent instance and modify the respective configs in [`run.py`](run.py)  to test your own agents.
+Remeber to initializa a new agent instance and modify the respective configs for `your_customized_model` in [`run.py`](run.py)  to test your own agents.
 
 ``` python
-# Code snippets to initialize and customize the agent configs
-llm_config.gen_config["temperature"] = args.temperature
-llm_config.gen_config["top_p"] = args.top_p
-llm_config.gen_config["context_length"] = args.context_length
-llm_config.gen_config["max_tokens"] = args.max_tokens
-llm_config.gen_config["stop_token"] = args.stop_token
-llm_config.gen_config["max_obs_length"] = args.max_obs_length   
+# the key code snippets to initialize and customize the agent configs
+
+# the tokenizer
+tokenizer = AutoTokenizer.from_pretrained(os.environ["HF_MODEL_ID"], trust_remote_code=True)
+
+# the language input
+prompt = self.prompt_constructor.construct(trajectory, intent, meta_data)
+
+# the image input
+# if using screenshot as image input
+image = trajectory[0]['observation']['image']
+# or if using the images from the current view, they are stored in the ./cache/img_bin folder, which can be retrieved by the following code
+img_paths = get_image_paths(img_cache_path)
 ```
 
 ## Citation

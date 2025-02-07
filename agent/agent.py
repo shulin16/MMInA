@@ -54,12 +54,20 @@ class GPT4VisionClient:
             return base64.b64encode(image_file.read()).decode('utf-8')
 
     def query(self, text, image_paths):
-        content_items = [{"type": "text", "text": text}]
+        content_items = [
+            {
+                "type": "text",
+                "text": text
+            }
+        ]
+
         for img_path in image_paths:
             base64_image = self.encode_image(img_path)
             content_items.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                }
             })
 
         headers = {
@@ -82,8 +90,63 @@ class GPT4VisionClient:
         response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
         a = response.json()
         return a["choices"][0]["message"]["content"]
-    
 
+
+class GPTClient_Azure:
+    def __init__(self):
+        self.subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
+        self.deployment = os.getenv("DEPLOYMENT_NAME", "gpt-4o")  
+        self.endpoint = os.getenv("ENDPOINT_URL")
+        self.client = AzureOpenAI(  
+            azure_endpoint=self.endpoint,  
+            api_key=self.subscription_key,  
+            api_version="2024-05-01-preview",  
+        )
+        
+    def encode_image(self, image_path):
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')  # GPT-4Vision
+            # return base64.b64encode(open(image_path, 'rb').read()).decode('ascii')  # Azure 
+
+    def query(self, text, image_paths):
+        content_items = [
+            {
+                "type": "text",
+                "text": text
+            }
+        ]
+        for img_path in image_paths:
+            base64_image = self.encode_image(img_path)
+            content_items.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                }
+            })
+
+        chat_prompt = [
+            {
+                "role": "user",
+                "content": content_items
+            }
+        ]
+        
+        # Generate the completion  
+        completion = self.client.chat.completions.create(  
+            model=self.deployment,  
+            messages=chat_prompt,  
+            max_tokens=800,  
+            temperature=0.7,  
+            top_p=0.95,  
+            frequency_penalty=0,  
+            presence_penalty=0,  
+            stop=None,  
+            stream=False
+        )
+        result = completion.choices[0].message.content
+        result_j = completion.to_json()
+        return result, result_j
+    
 class Agent:
     """Base class for the agent"""
 
@@ -115,7 +178,10 @@ class TeacherForcingAgent(Agent):
 
     @beartype
     def set_actions(self, action_seq: str | list[str]) -> None:
-        action_strs = action_seq.strip().split("\n") if isinstance(action_seq, str) else action_seq
+        if isinstance(action_seq, str):
+            action_strs = action_seq.strip().split("\n")
+        else:
+            action_strs = action_seq
         action_strs = [a.strip() for a in action_strs]
 
         actions = []
@@ -126,8 +192,10 @@ class TeacherForcingAgent(Agent):
                 elif self.action_set_tag == "id_accessibility_tree":
                     cur_action = create_id_based_action(a_str)
                 else:
-                    raise ValueError(f"Unknown action type {self.action_set_tag}")
-            except ActionParsingError:
+                    raise ValueError(
+                        f"Unknown action type {self.action_set_tag}"
+                    )
+            except ActionParsingError as e:
                 cur_action = create_none_action()
 
             cur_action["raw_prediction"] = a_str
@@ -272,7 +340,19 @@ class PromptAgent(Agent):
         prompt_path = f"{hop_res_path}/prompt.json"
         with open(prompt_path, 'w', encoding='utf-8') as json_file:
             json.dump(prompt, json_file, ensure_ascii=False, indent=4)
-            
+        
+        # Prepare the image
+        def get_image_paths(folder):
+            supported_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
+            img_paths = []
+            for filename in os.listdir(folder):
+                if any(filename.lower().endswith(ext) for ext in supported_extensions):
+                    img_paths.append(os.path.join(folder, filename))
+            return img_paths
+        
+        
+        img_cache_path = args.imgbin_dir
+        img_paths = get_image_paths(img_cache_path)
         # =======baselines implementation=======
 
         if "cogagent" in lm_config.model.lower():
@@ -443,71 +523,6 @@ def remov_duplicates(input):
     s = " ".join(UniqW.keys())
     return s
 
-def bart_predict(input, model, skip_special_tokens=True, **kwargs):
-    input_ids = bart_tokenizer(input)["input_ids"]
-    input_ids = torch.tensor(input_ids).unsqueeze(0)
-    output = model.generate(input_ids, max_length=512, **kwargs)
-    return bart_tokenizer.batch_decode(
-        output.tolist(), skip_special_tokens=skip_special_tokens
-    )
-
-
-def predict(obs, info, model, softmax=False, rule=False, bart_model=None):
-    valid_acts = info["valid"]
-    if valid_acts[0].startswith("search["):
-        if bart_model is None:
-            return valid_acts[-1]
-        else:
-            goal = process_goal(obs)
-            query = bart_predict(
-                goal, bart_model, num_return_sequences=5, num_beams=5
-            )
-            # query = random.choice(query)  # in the paper, we sample from the top-5 generated results.
-            query = query[
-                0
-            ]  # ... but use the top-1 generated search will lead to better results than the paper results.
-            return f"search[{query}]"
-
-    if rule:
-        item_acts = [
-            act for act in valid_acts if act.startswith("click[item - ")
-        ]
-        if item_acts:
-            return item_acts[0]
-        else:
-            assert "click[buy now]" in valid_acts
-            return "click[buy now]"
-
-    state_encodings = tokenizer(
-        process(obs), max_length=512, truncation=True, padding="max_length"
-    )
-    action_encodings = tokenizer(
-        list(map(process, valid_acts)),
-        max_length=512,
-        truncation=True,
-        padding="max_length",
-    )
-    batch = {
-        "state_input_ids": state_encodings["input_ids"],
-        "state_attention_mask": state_encodings["attention_mask"],
-        "action_input_ids": action_encodings["input_ids"],
-        "action_attention_mask": action_encodings["attention_mask"],
-        "sizes": len(valid_acts),
-        "images": info["image_feat"].tolist(),
-        "labels": 0,
-    }
-    batch = data_collator([batch])
-    # make batch cuda
-    batch = {k: v.cuda() for k, v in batch.items()}
-    outputs = model(**batch)
-    if softmax:
-        idx = torch.multinomial(F.softmax(outputs.logits[0], dim=0), 1)[
-            0
-        ].item()
-    else:
-        idx = outputs.logits[0].argmax(0).item()
-    return valid_acts[idx]
-
 
 def get_formatted_prompt(prompt: str) -> str:
     return f"<image>User: {prompt} GPT:<answer>"
@@ -584,46 +599,7 @@ def construct_llm_config(args: argparse.Namespace) -> lm_config.LMConfig:
             "max_obs_length": args.max_obs_length
         })
     elif args.provider == "custom":
-        if "otter" in args.model.lower():
-            llm_config.gen_config.update({
-                "temperature": args.pt_model.config.temperature,
-                "top_p": args.pt_model.config.top_p,
-                "context_length": args.pt_model.config.max_length,
-                "max_tokens": args.max_tokens,
-                "stop_token": args.stop_token,
-                "max_obs_length": args.max_obs_length
-            })
-        elif "wizardlm" in args.model.lower():
-            llm_config.gen_config.update({
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "max_tokens": args.max_tokens
-            })
-        elif "codellama" in args.model.lower():
-            llm_config.gen_config.update({
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "context_length": 4096,
-                "max_tokens": args.max_tokens,
-                "max_obs_length": args.max_obs_length
-            })
-        elif "fuyu" in args.model.lower():
-            llm_config.gen_config.update({
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "context_length": 4096,
-                "max_tokens": args.max_tokens,
-                "max_obs_length": args.max_obs_length
-            })
-        elif "webshop" in args.model.lower():
-            llm_config.gen_config.update({
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "context_length": 4096,
-                "max_tokens": args.max_tokens,
-                "max_obs_length": args.max_obs_length
-            })
-        elif "gemini" in args.model.lower():
+        if "cogagent" in args.model.lower():
             llm_config.gen_config.update({
                 "temperature": args.temperature,
                 "top_p": args.top_p,
@@ -632,24 +608,8 @@ def construct_llm_config(args: argparse.Namespace) -> lm_config.LMConfig:
                 "stop_token": args.stop_token,
                 "max_obs_length": args.max_obs_length
             })
-        elif "gpt" in args.model.lower():
-            llm_config.gen_config.update({
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "context_length": 4096,
-                "max_tokens": args.max_tokens,
-                "stop_token": args.stop_token,
-                "max_obs_length": args.max_obs_length
-            })
-        elif "llava" in args.model.lower():
-            llm_config.gen_config.update({
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "context_length": 4096,
-                "max_tokens": args.max_tokens,
-                "stop_token": args.stop_token,
-                "max_obs_length": args.max_obs_length
-            })
+        elif "your_customized_model" in args.model.lower():
+            pass
     else:
         raise NotImplementedError(f"provider {args.provider} not implemented")
     return llm_config
