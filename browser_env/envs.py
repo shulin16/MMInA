@@ -148,17 +148,14 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         else:
             instance_config = {}
 
-        # print("***************ckpt_setup0*************")
 
         storage_state = instance_config.get("storage_state", None)
         start_url = instance_config.get("start_url", None)
         geolocation = instance_config.get("geolocation", None)
 
-        # print("***************ckpt_setup**************")
         # print(storage_state)
         # print(start_url)
         # print(geolocation)
-        # print("emmmmmm")
 
         self.context = self.browser.new_context(
             viewport=self.viewport_size,
@@ -167,7 +164,6 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             device_scale_factor=1,
         )
 
-        # print("****************ckpt_setup1************")
         if self.save_trace_enabled:
             self.context.tracing.start(screenshots=True, snapshots=True)
         if start_url:
@@ -196,10 +192,9 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         return page.client  # type: ignore
 
     @beartype
-    def _get_obs(self,cnt1: int,cnt2: int):
-        # print("ckpt__get_obs")
+    def _get_obs(self,task_cnt: int,hop_cnt: int):
         obs = self.observation_handler.get_observation(
-            self.page, self.get_page_client(self.page), cnt1, cnt2
+            self.page, self.get_page_client(self.page), task_cnt, hop_cnt
         )
         return obs
 
@@ -214,8 +209,8 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         *,
         seed: int | None = None,
         options: dict[str, str] | None = None,
-        cnt1: int,
-        cnt2: int
+        task_cnt: int,
+        hop_cnt: int
     ) -> tuple[dict[str, Observation], dict[str, Any]]:
         """
         Reset the environment.
@@ -227,16 +222,12 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             self.context_manager.__exit__()
 
         if options is not None and "config_file" in options:
-            print("******************ckpt0*************")
             config_file = Path(options["config_file"])
-            print("****************ckpt00*************")
             if config_file.exists():
-                print("*******************ckpt000*****************")
                 self.setup(config_file=config_file)
             else:
                 raise ValueError(f"Config file {config_file} does not exist.")
         else:
-            print("********************ckpt1***************")
             self.setup()
         self.reset_finished = True
 
@@ -244,16 +235,14 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             time.sleep(self.sleep_after_execution)
 
 
-        print("***********ckpt_envs*************")
         # print(type(config_file))
         # numbers = re.findall(r'\d+',str(config_file))
-        # cnt1 = int(numbers[0]) if numbers else None
+        # task_cnt = int(numbers[0]) if numbers else None
 
-        # print(type(cnt1),cnt1)
+        # print(type(task_cnt),task_cnt)
 
-        observation = self._get_obs(cnt1,cnt2)
+        observation = self._get_obs(task_cnt,hop_cnt)
 
-        # print("***********ckpt_envs2************")
         observation_metadata = self._get_obs_metadata()
         info = {
             "page": DetachedPage(self.page.url, ""),
@@ -274,7 +263,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             self.context_manager.__exit__()
 
     def step(
-        self, action: Action, cnt1: int, cnt2: int
+        self, action: Action, task_cnt: int, hop_cnt: int
     ) -> tuple[dict[str, Observation], float, bool, bool, dict[str, Any]]:
         if not self.reset_finished:
             raise RuntimeError("Call reset first before calling step.")
@@ -296,7 +285,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         if self.sleep_after_execution > 0:
             time.sleep(self.sleep_after_execution)
 
-        observation = self._get_obs(cnt1,cnt2)
+        observation = self._get_obs(task_cnt,hop_cnt)
         observation_metadata = self._get_obs_metadata()
 
         info = {

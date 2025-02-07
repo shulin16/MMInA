@@ -1,19 +1,17 @@
 import argparse
 import json
 import os
-
-# from vllm import LLM, SamplingParams
-import subprocess
+import base64
+import requests
 from typing import Any
 
-import google.generativeai as genai
+
 import openai
 import tiktoken
 import torch
 from beartype import beartype
 from beartype.door import is_bearable
 
-# Fuyu implementation
 from PIL import Image
 
 from agent.prompts import *
@@ -31,33 +29,21 @@ from llms.providers.openai_utils import (
     generate_from_openai_chat_completion,
     generate_from_openai_completion,
 )
-from models.llama.tokenizer import Tokenizer
 
-# Set your API key here
-GOOGLE_API_KEY = ""
-genai.configure(api_key=GOOGLE_API_KEY)
+# custom model implementation
 import base64
 import requests
 
-from transformers import FuyuForCausalLM, FuyuProcessor
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from collections import Counter
 
-import requests
-root = "/home/data2/stian/MMInA/sampling_data/caption/"
-                    
-
-# fuyu implementation: load model and processor
-model_id = "adept/fuyu-8b"
-processor_fuyu = FuyuProcessor.from_pretrained(model_id)
-model_fuyu = FuyuForCausalLM.from_pretrained(
-    model_id, torch_dtype=torch.bfloat16, device_map="cuda:0"
-).to(torch.bfloat16)
+root = "./cache/caption/"
 
 
 class GPT4VisionClient:
     def __init__(self):
         # Set your API key here
-        self.api_key = "" 
+        self.api_key = os.getenv("OPENAI_API_KEY") 
         self.headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
@@ -68,20 +54,12 @@ class GPT4VisionClient:
             return base64.b64encode(image_file.read()).decode('utf-8')
 
     def query(self, text, image_paths):
-        content_items = [
-            {
-                "type": "text",
-                "text": text
-            }
-        ]
-
+        content_items = [{"type": "text", "text": text}]
         for img_path in image_paths:
             base64_image = self.encode_image(img_path)
             content_items.append({
                 "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{base64_image}"
-                }
+                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
             })
 
         headers = {
@@ -137,10 +115,7 @@ class TeacherForcingAgent(Agent):
 
     @beartype
     def set_actions(self, action_seq: str | list[str]) -> None:
-        if isinstance(action_seq, str):
-            action_strs = action_seq.strip().split("\n")
-        else:
-            action_strs = action_seq
+        action_strs = action_seq.strip().split("\n") if isinstance(action_seq, str) else action_seq
         action_strs = [a.strip() for a in action_strs]
 
         actions = []
@@ -151,10 +126,8 @@ class TeacherForcingAgent(Agent):
                 elif self.action_set_tag == "id_accessibility_tree":
                     cur_action = create_id_based_action(a_str)
                 else:
-                    raise ValueError(
-                        f"Unknown action type {self.action_set_tag}"
-                    )
-            except ActionParsingError as e:
+                    raise ValueError(f"Unknown action type {self.action_set_tag}")
+            except ActionParsingError:
                 cur_action = create_none_action()
 
             cur_action["raw_prediction"] = a_str
@@ -201,58 +174,22 @@ class PromptAgent(Agent):
         self.action_set_tag = tag
 
     @beartype
-    def extract_past_questions(self, cnt: int, hist_fold: str) -> str:
-        import html2text
-        html_path = hist_fold
-        history = max(1, cnt - 1)
-        html_file = os.path.join(html_path, f'render_{history}.html')
-        # print('extract html history', html_file)
-        with open(html_file, 'r', encoding='utf-8') as html_input:
-            html_content = html_input.read()
-            # Convert HTML to Markdown
-            h = html2text.HTML2Text()
-            h.ignore_links = True
-            h.ignore_images = True
-            markdown_content = h.handle(html_content)
-        # print(markdown_content)
-        return markdown_content
-    
-    @beartype
     def extract_past_questions_multiple(self, cnt: int, hist_fold: str, num: int) -> str:
         import html2text
-        # html_path = '/data/lychen/code/web/MMInA/result_wikisimple_gpt4v'
         html_path = hist_fold
-        history = max(1, cnt - 1)
-        if cnt == 1:
-            html_file = os.path.join(html_path, f'render_1.html')
-            if not os.path.exists(html_file):
-                return ''
-            with open(html_file, 'r', encoding='utf-8') as html_input:
-                html_content = html_input.read()
-                # Convert HTML to Markdown
-                h = html2text.HTML2Text()
-                h.ignore_links = True
-                h.ignore_images = True
-                markdown_content = h.handle(html_content)
-            # print(markdown_content)
-            return markdown_content
-        else:
-            markdown_content = ""
-            for i in range(cnt-1, cnt-1-num, -1):
-                if i > 0:
-                    html_file = os.path.join(html_path, f'render_{i}.html')
-                    if not os.path.exists(html_file):
-                        break
-                    # print('extract html history', html_file)
-                    with open(html_file, 'r', encoding='utf-8') as html_input:
-                        html_content = html_input.read()
-                        # Convert HTML to Markdown
-                        h = html2text.HTML2Text()
-                        h.ignore_links = True
-                        h.ignore_images = True
-                        markdown_content = markdown_content + "\n" + h.handle(html_content)
-                        # print(markdown_content)
-            return markdown_content
+        markdown_content = ""
+        for i in range(cnt-1, cnt-1-num, -1):
+            if i > 0:
+                html_file = os.path.join(html_path, f'render_{i}.html')
+                if not os.path.exists(html_file):
+                    break
+                with open(html_file, 'r', encoding='utf-8') as html_input:
+                    html_content = html_input.read()
+                    h = html2text.HTML2Text()
+                    h.ignore_links = True
+                    h.ignore_images = True
+                    markdown_content += "\n" + h.handle(html_content)
+        return markdown_content
 
     @beartype
     def next_action(
@@ -283,9 +220,7 @@ class PromptAgent(Agent):
                     stop_token=lm_config.gen_config["stop_token"],
                 )
             else:
-                raise ValueError(
-                    f"OpenAI models do not support mode {lm_config.mode}"
-                )
+                raise ValueError(f"OpenAI models do not support mode {lm_config.mode}")
 
         try:
             parsed_response = self.prompt_constructor.extract_action(response)
@@ -313,321 +248,93 @@ class PromptAgent(Agent):
         model=None,
         args: argparse.Namespace = None,
     ) -> Action:
-        print("cnt1 : ", args.cnt1," cnt2 : ", args.cnt2)
-        print("history: ", args.hist)
+        
+        print("Current processing task: ", args.task_cnt," hop: ", args.hop_cnt)
         # switch of past history
         if args.hist:
-            # meta_data["past_history"] = self.extract_past_questions(args.cnt1, args.hist_fold) # debug: only works for html
-            meta_data["past_history"] = self.extract_past_questions_multiple(args.cnt1, args.hist_fold, args.hist_num) # debug: only works for html
-            print(f"=======================using past {args.hist_num} histories=======================")
-            print("hist_fold: ",args.hist_fold)
+            meta_data["past_history"] = self.extract_past_questions_multiple(args.task_cnt, args.hist_fold, args.hist_num)
+            print(f"Using past {args.hist_num} histories...")
+            # print("hist_fold: ",args.hist_fold)
         else:
             meta_data["past_history"] = ''
         prompt = self.prompt_constructor.construct(
             trajectory, intent, meta_data
         )
-        # TODO: add classification b4 function call
         lm_config = self.lm_config
-        folder_path1 = f"./full_result_shopping/{lm_config.model}/{args.cnt1}"
-        folder_path2 = f"{folder_path1}/{args.cnt2}"
-        os.makedirs(folder_path2, exist_ok=True)
-        file_path = f"{folder_path2}/prompt.json"
-        with open(file_path, 'w', encoding='utf-8') as json_file:
+        model_res_path = os.path.join(args.result_dir, lm_config.model, args.domain)
+        if args.hist:
+            model_res_path = os.path.join(model_res_path, f'hist_{args.hist_num}')
+        task_res_path = os.path.join(model_res_path, f"task_{args.cnt1}")
+        hop_res_path = os.path.join(task_res_path, f"hop_{args.cnt2}")
+        os.makedirs(hop_res_path, exist_ok=True)
+        
+        # Save the prompt
+        prompt_path = f"{hop_res_path}/prompt.json"
+        with open(prompt_path, 'w', encoding='utf-8') as json_file:
             json.dump(prompt, json_file, ensure_ascii=False, indent=4)
-
-        if "otter" in lm_config.model.lower():
-            if lm_config.mode == "chat":
-                lang_only = True
-                if lang_only:
-                    response = get_response_lo(prompt, model=model)
-        elif "wizardlm" in lm_config.model.lower():
-            if lm_config.mode == "chat":
-                response = generate_from_openai_chat_completion(
-                    messages=prompt,
-                    model=lm_config.model,
-                    temperature=lm_config.gen_config["temperature"],
-                    top_p=lm_config.gen_config["top_p"],
-                    context_length=lm_config.gen_config["context_length"],
-                    max_tokens=lm_config.gen_config["max_tokens"],
-                    stop_token=None,
-                )
-        elif "codellama" in lm_config.model.lower():
-            caption, caption_name = args.caption, args.caption_name
-            caption_path = os.path.join(root, caption_name)
-            # use codellama instruction as "chat" mode
-            if lm_config.mode == "chat":
-                script_path = "/home/data2/stian/MMInA/models/codellama_gen.py"
-                modified_prompt = {"role": "user", "content": ""}
-                modified_prompt["content"] = prompt[0]["content"] + prompt[-1]["content"]
-                if caption:
-                    print(f"================Using BLIP captioning: {caption} =========================")
-                    with open(caption_path, "r") as f:
-                        captions = f.read()
-                        modified_prompt['content'] = modified_prompt['content'] + "IMAGE CAPTIONS:\n" + captions
-                # save as temperory json file
-                temp_path = "/home/data2/stian/MMInA/sampling_data/temp.json"
-                with open(temp_path, "w") as f:
-                    json.dump(modified_prompt, f)
-
-                result = subprocess.run(
-                    [
-                        "torchrun",
-                        script_path,
-                        "--instruction_path",
-                        temp_path,
-                        "--ckpt_dir",
-                        "/home/data2/stian/MMInA/models/CodeLlama-7b-Instruct/",
-                        "--tokenizer_path",
-                        "/home/data2/stian/MMInA/models/CodeLlama-7b-Instruct/tokenizer.model",
-                        "--max_seq_len",
-                        "1024",
-                        "--max_batch_size",
-                        "1",
-                    ],
-                    stdout=subprocess.PIPE,
-                )
-                # Access the output
-                # response = result.stdout.decode('utf-8').split("Here is the next action I will perform:\n\n")[-1]
-                response = "```" + result.stdout.decode("utf-8").split(
-                    "In summary, the next action I will perform is ```"
-                )[-1].split("```")[0] + "```"
-                # response = result.stdout.decode('utf-8')
-                print(response)
-                # response = wrapper_response(response)
-                
-            elif lm_config.mode == "completion":
-                response = model.text_completion(
-                    prompts,
-                    max_gen_len=None,
-                    temperature=lm_config.gen_config["temperature"],
-                    top_p=lm_config.gen_config["top_p"],
-                )
-        elif "fuyu" in lm_config.model.lower():
-            if lm_config.mode == "chat":
-                # prepare input_image for the model
-                imgpath = "/home/data2/stian/MMInA/sampling_data/imgs_caption/output_img.png"
-                img = Image.open(imgpath)
-
-                processor = processor_fuyu
-                model = model_fuyu
-
-                # prepare input_text for the model
-                modified_prompt = {"role": "user", "content": ""}
-                for i in range(len(prompt)):
-                    p = prompt[i]["content"]
-                    # p = p.replace("\n", " ")
-                    # p = p.replace("\t", " ")
-                    modified_prompt["content"] += p + "\n"
-                # save as temperory json file
-                temp_path = "/home/data2/stian/MMInA/sampling_data/temp_fuyu.json"
-                with open(temp_path, "w") as f:
-                    json.dump(modified_prompt, f)
-                text_prompt = modified_prompt["content"]
-
-                # preprocess input for the model
-                inputs = processor(text=text_prompt, images=img, return_tensors="pt").to("cuda:0")
-
-                # autoregressively generate text
-                generation_output = model.generate(
-                    **inputs,
-                    max_new_tokens=200,
-                    pad_token_id=model.config.eos_token_id,
-                )
-                # generation_text = processor.batch_decode(
-                #     generation_output[:, -100:], skip_special_tokens=True
-                # )
-                # response = generation_text[0]
-                response = processor.batch_decode(
-                    generation_output[:, :],
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=True,
-                )[0]  # return the string format of the response
-                response = wrapper_response_fuyu(response)
-
-            elif lm_config.mode == "completion":
-                pass
-
-        elif "mind2act" in lm_config.model.lower():
-            pass
-        elif "webshop" in lm_config.model.lower():
-            assistant = "GPT"
-            caption, caption_name = args.caption, args.caption_name
-            caption_path = os.path.join(root, caption_name)
-            def bart_predict(input, model, skip_special_tokens=True, **kwargs):
-                input_ids = bart_tokenizer(input)["input_ids"]
-                input_ids = torch.tensor(input_ids).unsqueeze(0)
-                output = model.generate(input_ids, max_length=512, **kwargs)
-                return bart_tokenizer.batch_decode(
-                    output.tolist(), skip_special_tokens=skip_special_tokens
-                )
-
-            from transformers import (
-                BartForConditionalGeneration,
-                BartTokenizer,
-            )
-
-            bart_tokenizer = BartTokenizer.from_pretrained(
-                "facebook/bart-large"
-            )
-            print("bart tokenizer loaded")
-            # Load pretrained bart model
-            bart_path = "/home/data2/stian/MMInA/models/webshop/ckpts/web_search/checkpoint-800"
-            bart_model = BartForConditionalGeneration.from_pretrained(
-                bart_path, torch_dtype=torch.bfloat16
-            )
-            print("bart model loaded", bart_path)
-            with open("/home/data2/stian/MMInA/accessibility_tree.json") as f:
-                data = json.load(f)
-                acc_tree = data[0]
-                print("accessibility tree loaded")
-            # Set your API key here
-            openai.api_key = ""
-            if caption: 
-                print(f"================Using BLIP captioning: {caption} =========================")
-                # Load captions
-                with open(caption_path, "r") as f:
-                    captions = f.read()
-                    prompt[-1]['content'] = prompt[-1]['content'] + "IMAGE CAPTIONS:\n" + captions + "\nGenerate 10 valid actions in str within a str of List either starts with 'search[' or 'click[id]' based on the given OBSERVATION, OBJECTIVE, PREVIOUS ACTION.\n"
-            else:
-                prompt[-1]["content"] += "\nGenerate 10 valid actions in str within a str of List either starts with 'search[' or 'click[id]' based on the given OBSERVATION, OBJECTIVE, PREVIOUS ACTION in this format: ['search[ ]', 'click[]', ...]\n"
-            if assistant == "GPT":
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo-1106",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are an autonomous intelligent agent tasked with navigating a web browser. You will be given web-based tasks. These tasks will be accomplished through the use of specific actions you can issue.\n\nHere's the information you'll have:\nThe user's objective: This is the task you're trying to complete.\nThe current web page's accessibility tree: This is a simplified representation of the webpage, providing key information.\nThe current web page's URL: This is the page you're currently navigating.\nThe open tabs: These are the tabs you have open.\nThe previous action: This is the action you just performed. It may be helpful to track your progress.\nThe current images' captions on this page. It may be helpful to provide more information.\n\nYou should generate a list of 10 valid actions either starts with 'search[' or 'click[id]' based on the given OBSERVATION, OBJECTIVE, PREVIOUS ACTION.",
-                        },
-                        # {
-                        #     "role": "user",
-                        #     "content": "OBSERVATION:\n[1744] link 'HP CB782A#ABA 640 Inkjet Fax Machine (Renewed)'\n\t\t[1749] StaticText '$279.49'\n\t\t[1757] button 'Add to Cart'\n\t\t[1760] button 'Add to Wish List'\n\t\t[1761] button 'Add to Compare'\nURL: http://onestopmarket.com/office-products/office-electronics.html\nOBJECTIVE: What is the price of HP Inkjet Fax Machine\nPREVIOUS ACTION: None\nLet's think step-by-step. This page list the information of HP Inkjet Fax Machine, which is the product identified in the objective. Its price is $279.49. I think I have achieved the objective. I will issue the stop action with the answer. In summary, the next action I will perform is ```stop [$279.49]```\nOBSERVATION:\n[164] textbox 'Search' focused: True required: False\n[171] button 'Go'\n[174] link 'Find directions between two points'\n[212] heading 'Search Results'\n[216] button 'Close'\nURL: http://openstreetmap.org\nOBJECTIVE: Show me the restaurants near CMU\nPREVIOUS ACTION: None\nLet's think step-by-step. This page has a search box whose ID is [164]. According to the nominatim rule of openstreetmap, I can search for the restaurants near a location by \"restaurants near\". I can submit my typing by pressing the Enter afterwards. In summary, the next action I will perform is ```type [164] [restaurants near CMU] [1]```\nOBSERVATION:\nTab 0 (current): Magento Admin\n\n[1] RootWebArea 'Magento Admin' focused: True\n\t[11] HeaderAsNonLandmark ''\n\t\t[13] link 'Magento Admin Panel'\n\t\t\t[16] img 'http://ec2-3-131-244-37.us-east-2.compute.amazonaws.com:7780/static/version1681922233/adminhtml/Magento/backend/en_US/images/magento-logo.svg'\n\t[7] group 'Welcome, please sign in'\n\t\t[20] LineBreak '\\n'\n\t\t[35] StaticText 'Username'\n\t\t[10] textbox 'Username *' focused: True required: False\n\t\t[40] StaticText 'Password'\n\t\t[31] textbox 'Password *' required: False\n\t\t[23] LayoutTable ''\n\t\t\t[32] button 'Sign in'\n\t\t\t[33] link 'Forgot your password?'\n\t[12] FooterAsNonLandmark ''\n\t\t[14] link 'Magento'\n\t\t[15] StaticText 'Copyright \u00a9 2023 Magento Commerce Inc. All rights reserved.'\nURL: http://luma.com/admin\nOBJECTIVE: i am looking for blue color toothbrushes that helps to maintain my oral hygiene, and price lower than 60.00 dollars\nPREVIOUS ACTION: None\nIMAGE CAPTIONS: magento logo with orange and black background\n",
-                        # },
-                        {
-                            "role": "assistant",
-                            "content": "['search[blue oral hygiene toothbrushes]', 'search[blue oral hygiene toothbrush]', 'search[blue dental hygiene toothbrushes]', 'search[blue oral hygiene teethbrushes]', 'search[blue dental hygiene toothbrush]', 'click[1234]', 'search[blue oral hygiene toothpaste]', 'search[blue oral hygiene toothbrushing]', 'click[1744]', 'search[blue toothbrushes]', 'stop [$279.49]']",
-                        },
-                        prompt[-1]
-                    ],
-                )
-                valid_acts = response["choices"][0]["message"]["content"]
-                import ast
-                valid_acts = ast.literal_eval(valid_acts)
-            elif assistant == "Gemini":
-                model = genai.GenerativeModel('gemini-pro')
-                model_input = prompt[-1]['content'] + "\nGenerate 10 valid actions in str within a str of List either starts with 'search[' or 'click[id]' based on the given OBSERVATION, OBJECTIVE, PREVIOUS ACTION.\n"
-                response = model.generate_content(model_input)
-                to_markdown(response.text)
-                response = response.candidates[0].content.parts[0].text
-                import re
-                pattern = r'(search|click)(\[.*?\])'
-                matching_strings = re.findall(pattern, response)
-                valid_acts = []
-                for match in matching_strings:
-                    action_type, content_with_brackets = match
-                    valid_act = action_type + content_with_brackets
-                    valid_acts.append(valid_act)
-
-            if valid_acts[0].startswith("search"):
-                query = bart_predict(intent, bart_model, num_return_sequences=5, num_beams=5)
-                query = query[0]
-                action = f"search[{query}]"
-            else:
-                action = valid_acts[0]
-
-            response = wrapper_response_webshop(action)
-        elif "gemini-pro" == lm_config.model.lower():
-            caption, caption_name = args.caption, args.caption_name
-            caption_path = os.path.join(root, caption_name)
-            modified_prompt = ""
-            for i in range(len(prompt)):
-                p = prompt[i]["content"]
-                # p = p.replace("\n", " ")
-                # p = p.replace("\t", " ")
-                modified_prompt += p + "\n"
-            if caption:
-                print(f"================Using BLIP captioning: {caption} =========================")
-                with open(caption_path, "r") as f:
-                    captions = f.read()
-                    modified_prompt += modified_prompt + "IMAGE CAPTIONS:\n" + captions
-                    
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(modified_prompt)
-            to_markdown(response.text)
-            response = response.candidates[0].content.parts[0].text
             
-        elif "gemini-pro-vision" == lm_config.model.lower():
-            # prepare input_image for the model
-            imgpath = "/home/data2/stian/MMInA/sampling_data/imgs_gemini/output_img.jpg"
-            try:
-                img = Image.open(imgpath)
-            except:
-                img = Image.open("/home/data2/stian/MMInA/white.jpg")
-            model = genai.GenerativeModel("gemini-pro-vision")
-            modified_prompt = ""
-            for i in range(len(prompt)):
-                p = prompt[i]["content"]
-                # p = p.replace("\n", " ")
-                # p = p.replace("\t", " ")
-                modified_prompt += p + "\n"
-            # # save as temperory json file
-            # temp_path = "/home/data2/stian/MMInA/sampling_data/temp.json"
-            # with open(temp_path, "w") as f:
-            #     json.dump(modified_prompt, f)
-            response = model.generate_content(
-                [modified_prompt, img], stream=True
-            )
-            response.resolve()
-            response = response.text
-            print(response)
-            response_path = f"{folder_path2}/response.json"
-            with open(response_path, 'w', encoding='utf-8') as f:
-                json.dump(response, f, ensure_ascii=False, indent=4)
-        elif "gpt4v" == lm_config.model.lower():
-            # Prepare prompts
-            extracted_prompt = ""
-            for i in range(len(prompt)):
-                p = prompt[i]["content"]
-                # p = p.replace("\n", " ")
-                # p = p.replace("\t", " ")
-                extracted_prompt += p + "\n"
+        # =======baselines implementation=======
+
+        if "cogagent" in lm_config.model.lower():
+            print("Using cogagent...")
+            from PIL import Image
+            # Dictionary mapping format keys to format strings
+            format_dict = {
+                "action_op_sensitive": "(Answer in Action-Operation-Sensitive format.)",
+                "status_plan_action_op": "(Answer in Status-Plan-Action-Operation format.)",
+                "status_action_op_sensitive": "(Answer in Status-Action-Operation-Sensitive format.)",
+                "status_action_op": "(Answer in Status-Action-Operation format.)",
+                "action_op": "(Answer in Action-Operation format.)",
+            }
+            format_key = "action_op_sensitive"
+            format_str = format_dict[format_key]
             
-            # Prepare imgs
-            def get_image_paths(folder):
-                supported_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
-                img_paths = []
-                for filename in os.listdir(folder):
-                    if any(filename.lower().endswith(ext) for ext in supported_extensions):
-                        img_paths.append(os.path.join(folder, filename))
-                return img_paths
-            folder_path = "/home/data2/stian/MMInA/imgbin"
-            img_paths = get_image_paths(folder_path)
-            print(f"img_paths: {img_paths}")
-            force_prompt = '\nGenerate the action in the correct format. Start with a "In summary, the next action I will perform is" phrase, followed by action inside ``````'
-            client = GPT4VisionClient()
-            response = client.query(extracted_prompt + force_prompt, img_paths)
-            print(response)
-            file_path2 = f"{folder_path2}/response.json"
-            with open(file_path2, 'w', encoding='utf-8') as json_file2:
-                json.dump(response, json_file2, ensure_ascii=False, indent=4)
-        elif "gpt4" == lm_config.model.lower():
-            caption, caption_name = args.caption, args.caption_name
-            caption_path = os.path.join(root, caption_name)
-            # Set your API key here
-            openai.api_key = ""
-            if caption:
-                print(f"================Using BLIP captioning: {caption} =========================")
-                print(f"caption_path: {caption_path, os.path.exists(caption_path)}")
-                with open(caption_path, "r") as f:
-                    captions = f.read()
-                    # captions_t = remov_duplicates(captions)
-                    prompt[-1]['content'] = prompt[-1]['content'] + "IMAGE CAPTIONS:\n" + captions
-            response = openai.ChatCompletion.create(
-                model="gpt-4-0125-preview",
-                messages=prompt,
-            )
-            response = response["choices"][0]["message"]["content"]
-        elif "llava" in lm_config.model.lower():
-            model = model_llava
+            platform_str = f"(Platform: Mac)\n"
+            # Initialize history lists
+            history_step = []
+            history_action = []
+            round_num = 1
+            # image = Image.open(img_path).convert("RGB")
+            image = trajectory[0]['observation']['image']
+            image = Image.fromarray(image).convert("RGB")
+            
+            # Verify history lengths match
+            if len(history_step) != len(history_action):
+                raise ValueError("Mismatch in lengths of history_step and history_action.")
+
+            # Format history steps for output
+            history_str = "\nHistory steps: "
+            for index, (step, action) in enumerate(zip(history_step, history_action)):
+                history_str += f"\n{index}. {step}\t{action}"
+            
+            # Compose the query with task, platform, and selected format instructions
+            task = intent
+            query = f"Task: {task}{history_str}\n{platform_str}{format_str}"
+            tokenizer = args.loaded_tokenizer
+            
+            prompt[-1]["image"] = image
+
+            inputs = tokenizer.apply_chat_template(
+                        prompt,
+                        add_generation_prompt=True,
+                        tokenize=True,
+                        return_tensors="pt",
+                        return_dict=True,
+                    ).to(model.device)
+            # Generation parameters
+            gen_kwargs = {
+                "max_length": args.max_obs_length,
+                "do_sample": True,
+                "top_k": 50,
+            }
+            # Generate response
+            with torch.no_grad():
+                outputs = model.generate(**inputs, **gen_kwargs)
+                outputs = outputs[:, inputs["input_ids"].shape[1]:]
+                response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                print(f"Model response:\n{response}")
+        
+        
         else:
             raise ValueError(
                 f"Your custom model {lm_config.model} do not support mode {lm_config.mode}"
@@ -653,6 +360,14 @@ class PromptAgent(Agent):
     def reset(self, test_config_file: str) -> None:
         pass
 
+# Prepare the image
+def get_image_paths(folder):
+    supported_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
+    img_paths = []
+    for filename in os.listdir(folder):
+        if any(filename.lower().endswith(ext) for ext in supported_extensions):
+            img_paths.append(os.path.join(folder, filename))
+    return img_paths
 
 # Wrapper for get_response
 def wrapper_response(res: str) -> str:
@@ -860,67 +575,81 @@ def construct_llm_config(args: argparse.Namespace) -> lm_config.LMConfig:
     )
 
     if args.provider == "openai":
-        llm_config.gen_config["temperature"] = args.temperature
-        llm_config.gen_config["top_p"] = args.top_p
-        llm_config.gen_config["context_length"] = args.context_length
-        llm_config.gen_config["max_tokens"] = args.max_tokens
-        llm_config.gen_config["stop_token"] = args.stop_token
-        llm_config.gen_config["max_obs_length"] = args.max_obs_length
+        llm_config.gen_config.update({
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "context_length": args.context_length,
+            "max_tokens": args.max_tokens,
+            "stop_token": args.stop_token,
+            "max_obs_length": args.max_obs_length
+        })
     elif args.provider == "custom":
         if "otter" in args.model.lower():
-            llm_config.gen_config[
-                "temperature"
-            ] = args.pt_model.config.temperature
-            llm_config.gen_config["top_p"] = args.pt_model.config.top_p
-            llm_config.gen_config["context_length"] = args.pt_model.config.max_length  # qn: what is context_length?
-            llm_config.gen_config["max_tokens"] = args.max_tokens
-            llm_config.gen_config["stop_token"] = args.stop_token
-            llm_config.gen_config["max_obs_length"] = args.max_obs_length
+            llm_config.gen_config.update({
+                "temperature": args.pt_model.config.temperature,
+                "top_p": args.pt_model.config.top_p,
+                "context_length": args.pt_model.config.max_length,
+                "max_tokens": args.max_tokens,
+                "stop_token": args.stop_token,
+                "max_obs_length": args.max_obs_length
+            })
         elif "wizardlm" in args.model.lower():
-            sampling_params = SamplingParams(args.temperature, args.top_p)
-            llm_config.gen_config["temperature"] = args.temperature
-            llm_config.gen_config["top_p"] = args.top_p
-            # llm_config.gen_config["context_length"] =
-            llm_config.gen_config["max_tokens"] = args.max_tokens
+            llm_config.gen_config.update({
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "max_tokens": args.max_tokens
+            })
         elif "codellama" in args.model.lower():
-            llm_config.gen_config["temperature"] = args.temperature
-            llm_config.gen_config["top_p"] = args.top_p
-            llm_config.gen_config["context_length"] = 4096
-            llm_config.gen_config["max_tokens"] = args.max_tokens
-            llm_config.gen_config["max_obs_length"] = args.max_obs_length
+            llm_config.gen_config.update({
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "context_length": 4096,
+                "max_tokens": args.max_tokens,
+                "max_obs_length": args.max_obs_length
+            })
         elif "fuyu" in args.model.lower():
-            llm_config.gen_config["temperature"] = args.temperature
-            llm_config.gen_config["top_p"] = args.top_p
-            llm_config.gen_config["context_length"] = 4096
-            llm_config.gen_config["max_tokens"] = args.max_tokens
-            llm_config.gen_config["max_obs_length"] = args.max_obs_length
+            llm_config.gen_config.update({
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "context_length": 4096,
+                "max_tokens": args.max_tokens,
+                "max_obs_length": args.max_obs_length
+            })
         elif "webshop" in args.model.lower():
-            llm_config.gen_config["temperature"] = args.temperature
-            llm_config.gen_config["top_p"] = args.top_p
-            llm_config.gen_config["context_length"] = 4096 # 4096
-            llm_config.gen_config["max_tokens"] = args.max_tokens
-            llm_config.gen_config["max_obs_length"] = args.max_obs_length
+            llm_config.gen_config.update({
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "context_length": 4096,
+                "max_tokens": args.max_tokens,
+                "max_obs_length": args.max_obs_length
+            })
         elif "gemini" in args.model.lower():
-            llm_config.gen_config["temperature"] = args.temperature
-            llm_config.gen_config["top_p"] = args.top_p
-            llm_config.gen_config["context_length"] = 4096
-            llm_config.gen_config["max_tokens"] = args.max_tokens
-            llm_config.gen_config["stop_token"] = args.stop_token
-            llm_config.gen_config["max_obs_length"] = args.max_obs_length
+            llm_config.gen_config.update({
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "context_length": 4096,
+                "max_tokens": args.max_tokens,
+                "stop_token": args.stop_token,
+                "max_obs_length": args.max_obs_length
+            })
         elif "gpt" in args.model.lower():
-            llm_config.gen_config["temperature"] = args.temperature
-            llm_config.gen_config["top_p"] = args.top_p
-            llm_config.gen_config["context_length"] = 4096
-            llm_config.gen_config["max_tokens"] = args.max_tokens
-            llm_config.gen_config["stop_token"] = args.stop_token
-            llm_config.gen_config["max_obs_length"] = args.max_obs_length
+            llm_config.gen_config.update({
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "context_length": 4096,
+                "max_tokens": args.max_tokens,
+                "stop_token": args.stop_token,
+                "max_obs_length": args.max_obs_length
+            })
         elif "llava" in args.model.lower():
-            llm_config.gen_config["temperature"] = args.temperature
-            llm_config.gen_config["top_p"] = args.top_p
-            llm_config.gen_config["context_length"] = 4096
-            llm_config.gen_config["max_tokens"] = args.max_tokens
-            llm_config.gen_config["stop_token"] = args.stop_token
-            llm_config.gen_config["max_obs_length"] = args.max_obs_length         
+            llm_config.gen_config.update({
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "context_length": 4096,
+                "max_tokens": args.max_tokens,
+                "stop_token": args.stop_token,
+                "max_obs_length": args.max_obs_length
+            })
     else:
         raise NotImplementedError(f"provider {args.provider} not implemented")
     return llm_config
@@ -945,35 +674,12 @@ def construct_agent(args: argparse.Namespace) -> Agent:
             # tokenizer.decode () returns a string, and get an input of list of token ids
 
         elif args.provider == "custom":
-            if "otter" in args.model.lower():
-                tokenizer = args.pt_model.text_tokenizer
-
-            # TODO: add wizardlm tokenizer
-            elif "wizardlm" in args.model.lower():
-                tokenizer = args.pt_model.text_tokenizer  # ??
-            elif "codellama" in args.model.lower():
-                tokenizer_path = "/home/data2/stian/MMInA/models/CodeLlama-7b-Instruct/tokenizer.model"
-                # tokenizer = Tokenizer(model_path=tokenizer_path)
-                tokenizer = Tokenizer(model_path=tokenizer_path)
-            elif "fuyu" in args.model.lower():
-                # model_id = "adept/fuyu-8b"
-                # tokenizer = PersimmonTokenizer.from_pretrained(model_id)
-                # args.pt_processor = FuyuProcessor.from_pretrained(model_id)
-                tokenizer = processor_fuyu.tokenizer
-            elif "webshop" in args.model.lower():
-                from transformers import BartTokenizer
-
-                tokenizer = BartTokenizer.from_pretrained(
-                    "facebook/bart-large", torch_dtype=torch.bfloat16
-                )
-            elif "gemini" in args.model.lower():
-                # tokenizer = tiktoken.encoding_for_model(llm_config.model)
-                tokenizer = tiktoken.encoding_for_model("gpt-4-vision-preview")
-            elif "gpt" in args.model.lower():
-                # tokenizer = tiktoken.encoding_for_model(llm_config.model)
-                tokenizer = tiktoken.encoding_for_model("gpt-4-vision-preview")
-            elif "llava" in args.model.lower():
-                tokenizer = tokenizer_llava
+            if args.model == "cogagent-9b":
+                tokenizer = AutoTokenizer.from_pretrained(os.environ["HF_MODEL_ID"], trust_remote_code=True)
+                args.loaded_tokenizer = tokenizer
+            elif args.model == "your_customized_model":
+                # add your model's tokenizer here
+                pass
             else:
                 raise NotImplementedError(
                     f"Provider {args.provider} not implemented."

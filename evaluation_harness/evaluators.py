@@ -1,5 +1,6 @@
 """base class for evaluation"""
 # answer string match
+import os
 import importlib
 import json
 import time
@@ -17,6 +18,7 @@ from browser_env.utils import StateInfo
 from evaluation_harness.helper_functions import (
     gitlab_get_project_memeber_role,
     llm_fuzzy_match,
+    open_llm_fuzzy_match,
     reddit_get_post_url,
     shopping_get_latest_order_url,
     shopping_get_sku_latest_review_author,
@@ -141,7 +143,10 @@ class StringEvaluator(Evaluator):
                     intent = configs["intent"]
                     assert isinstance(value, list)
                     for reference in value:
-                        fuzzy_score = llm_fuzzy_match(pred, reference, intent)
+                        if os.environ.get("OPENAI_API_KEY") is not None:    
+                            fuzzy_score = llm_fuzzy_match(pred, reference, intent)
+                        else:
+                            fuzzy_score = open_llm_fuzzy_match(pred, reference, intent)
                         score = score * fuzzy_score
         return score
 

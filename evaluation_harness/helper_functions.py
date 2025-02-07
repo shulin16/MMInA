@@ -7,6 +7,18 @@ import requests
 from beartype import beartype
 from playwright.sync_api import CDPSession, Page
 
+import os
+from transformers import AutoModelForCausalLM, AutoTokenizer
+if os.environ.get("OPENAI_API_KEY") is None:
+    model_name = "Qwen/Qwen2.5-7B-Instruct"
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype="auto",
+        device_map="auto"
+    )
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    
+
 from browser_env.env_config import (
     ACCOUNTS,
     GITLAB,
@@ -188,6 +200,42 @@ def llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
             max_tokens=16,
             stop_token=None,
         )
+    
+    if "Yes" in response:
+        return 1.0
+    else:
+        return 0.0
+
+@beartype
+def open_llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
+    # Using Qwen-2.5-7b
+    messages: list[dict[str, Any]] = []
+    messages.append(
+        {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."}
+    )
+
+    messages.append(
+        {
+            "role": "user",
+            "content": f'Given the statement "{pred}", would it be correct to infer "{reference}"? Yes or No',
+        }
+    )
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+    generated_ids = model.generate(
+        **model_inputs,
+        max_new_tokens=512
+    )
+    generated_ids = [
+        output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+    ]
+
+    response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     
     if "Yes" in response:
         return 1.0
