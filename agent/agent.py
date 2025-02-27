@@ -36,7 +36,7 @@ import requests
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from collections import Counter
-
+from openai import AzureOpenAI
 root = "./cache/caption/"
 
 
@@ -332,8 +332,8 @@ class PromptAgent(Agent):
         model_res_path = os.path.join(args.result_dir, lm_config.model, args.domain)
         if args.hist:
             model_res_path = os.path.join(model_res_path, f'hist_{args.hist_num}')
-        task_res_path = os.path.join(model_res_path, f"task_{args.cnt1}")
-        hop_res_path = os.path.join(task_res_path, f"hop_{args.cnt2}")
+        task_res_path = os.path.join(model_res_path, f"task_{args.task_cnt}")
+        hop_res_path = os.path.join(task_res_path, f"hop_{args.hop_cnt}")
         os.makedirs(hop_res_path, exist_ok=True)
         
         # Save the prompt

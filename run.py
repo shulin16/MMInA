@@ -13,12 +13,13 @@ import torch
 from beartype import beartype
 
 MMINA_DICT={
-    'normal': 176,
-    'multi567': 180,
-    'compare': 100,
-    'multipro': 86,
     'shopping': 200,
-    'wikipedia': 308
+    'wikipedia': 308,
+    'normal': 176,
+    'compare': 100,
+    'multi567': 180,
+    'multipro': 86,
+    'full': 1050
 }  # total: 1050
 
 print("Done setting up URLs")
@@ -235,7 +236,7 @@ def test(
     agent: Agent | PromptAgent | TeacherForcingAgent,
     config_file_list: list[str],
 ) -> None:
-    scores = []    
+    scores = {}
     max_steps = args.max_steps
 
     early_stop_thresholds = {
@@ -261,6 +262,11 @@ def test(
     all_pass = 0
     all_all = 0
     for config_file in config_file_list:
+        sub_domain = config_file.split('/')[1]
+        scores[sub_domain] = {}
+        scores[sub_domain]['task_scores'] = []
+        scores[sub_domain]['hop_scores'] = []
+        
         try:
             render_helper = RenderHelper(
                 config_file, args.result_dir, args.action_set_tag
@@ -301,14 +307,14 @@ def test(
             
             cnt_ans = 0
             
-            if is_domain_type(args.domain, '2hop'):
+            if is_domain_type(sub_domain, '2hop'):
                 ## 2hop implementations
                 cnt_cl = 2
                 with open (config_file,"r") as file:
                     data = json.load(file)
                     reference = data['eval']['reference_answers']['must_include']
                 nxt = reference[0]
-            elif is_domain_type(args.domain, 'multihop'):
+            elif is_domain_type(sub_domain, 'multihop'):
                 ## Multihop implementations
                 with open (config_file,"r") as file:
                     data = json.load(file)
@@ -317,8 +323,7 @@ def test(
                     flight = data['flight']
                     shop = data['shop']
                 cnt_cl = len(check_list)
-                # print("cccckkkkpppttt-multihop")
-            elif is_domain_type(args.domain, 'singlehop'):
+            elif is_domain_type(sub_domain, 'singlehop'):
                 cnt_cl = 1
 
             # calculate sum of total hop numbers of all tasks
@@ -335,7 +340,7 @@ def test(
                 all_view_url.append(current_url)
 
                 # if multihop tasks: check whether the current url is the last url in the check_list
-                if is_domain_type(args.domain, '2hop'):
+                if is_domain_type(sub_domain, '2hop'):
                     if "kiwix" not in current_url and nxt in current_url:
                         if flag:
                             cnt_ans = cnt_ans+1
@@ -347,7 +352,7 @@ def test(
                             fg= False
                     if fg and cnt_ans == 1: cnt_ans = 2
 
-                elif is_domain_type(args.domain, 'multihop'):
+                elif is_domain_type(sub_domain, 'multihop'):
                     now_url = check_list[cnt_ans]
                     if flag:
                         if "kiwix" not in current_url and current_url!=None and "kiwix" in now_url and check_list[cnt_ans+1] in current_url:
@@ -386,7 +391,7 @@ def test(
                                 trajectory,
                                 intent,
                                 meta_data=meta_data,
-                                model=args.pt_model,
+                                model=args.loaded_model,
                                 args=args,
                             )
                             args.hop_cnt = args.hop_cnt + 1
@@ -428,9 +433,9 @@ def test(
                     break
             all_pass += cnt_ans
 
-            if is_domain_type(args.domain, 'multihop'):
-                logger.info(f"[Result] single task success rate: {cnt_ans}/{cnt_cl}")
-            
+            # if is_domain_type(sub_domain, 'multihop'):
+            #     logger.info(f"[Result] current single task success rate: {cnt_ans}/{cnt_cl}")
+            # evaluate the scores
             evaluator = evaluator_router(config_file)
             score = evaluator(
                 trajectory=trajectory,
@@ -438,8 +443,7 @@ def test(
                 page=env.page,
                 client=env.get_page_client(env.page),
             )
-
-            scores.append(score)
+            
             '''
             
             criteria = {
@@ -462,22 +466,36 @@ def test(
                 )
             '''
             
-            conditions = {
+            # Define success conditions for each domain type
+            success_conditions = {
                 'singlehop': lambda: score == 1,
                 '2hop': lambda: cnt_ans == 2,
                 'multihop': lambda: check_list[cnt_ans] == "end"
             }
-            
-            for domain_type, check in conditions.items():
-                if is_domain_type(args.domain, domain_type):
-                    result = "PASS" if check() else "FAIL"
+
+            # Special handling for singlehop domain
+            if is_domain_type(sub_domain, 'singlehop') and score == 1:
+                cnt_ans += 1
+
+            # Evaluate success based on domain type
+            for domain_type, check_success in success_conditions.items():
+                if is_domain_type(sub_domain, domain_type):
+                    passed = check_success()
+                    result = "PASS" if passed else "FAIL"
                     logger.info(f"[Result] ({result}) {config_file}")
+                    scores[sub_domain]['task_scores'].append(int(passed))
                     break
             else:
-                raise NotImplementedError(f"Domain {args.domain} not implemented")
+                raise NotImplementedError(f"Unsupported domain type: {sub_domain}")
             
+            scores[sub_domain]['task_success_rate'] = sum(scores[sub_domain]['task_scores']) / len(scores[sub_domain]['task_scores'])
+            # update the success rate for each subdomain
+            logger.info(f"[Result] Current task success rate: {scores[sub_domain]['task_success_rate']}")
             
-            logger.info(f"[Result] Current score: {sum(scores) / len(scores)}")
+            if not is_domain_type(sub_domain, 'singlehop'):
+                scores[sub_domain]['hop_scores'].append(f"{cnt_ans}/{cnt_cl}")
+                logger.info(f"[Result] Current hop success rate: {all_pass}/{all_all}")
+                scores[sub_domain]['hop_success_rate'] = f"{all_pass}/{all_all}"
             
             if args.save_trace_enabled:
                 env.save_trace(
@@ -495,12 +513,17 @@ def test(
                 f.write(f"[Config file]: {config_file}\n")
                 f.write(f"[Unhandled Error] {repr(e)}\n")
                 f.write(traceback.format_exc())  # write stack trace to file
-        logger.info(f"[Result] all success rate: {all_pass}/{all_all}")
+        
+        
         render_helper.close()
 
     env.close()
-    logger.info(f"Average score: {sum(scores) / len(scores)}")    
 
+    with open(Path(args.result_dir) / "scores.json", "w") as f:
+        json.dump(scores, f, indent=4)
+    
+    if args.domain == 'full':
+        save_scores_to_json(scores, args.result_dir)
 
 def prepare(args: argparse.Namespace) -> None:
     # convert prompt python files to json
@@ -570,6 +593,32 @@ def is_domain_type(domain, domain_type) -> bool:
     }
     return domain in domain_map.get(domain_type, [])
 
+def save_scores_to_json(scores: dict, result_dir: str) -> None:
+    """Save scores to JSON file organized by sub-domains"""    
+    # Create scores directory if it doesn't exist
+    scores_dir = Path(result_dir) / "scores"
+    scores_dir.mkdir(exist_ok=True)
+    
+    # Calculating total scores
+    results = {}
+    results['task_success_rate'] = {}
+    results['hop_success_rate'] = {}
+    # Calculate total success rates
+    results['task_success_rate']['hop1'] = (scores['shopping']['task_success_rate'] * MMINA_DICT['shopping'] + scores['wikipedia']['task_success_rate'] * MMINA_DICT['wikipedia']) / (MMINA_DICT['shopping'] + MMINA_DICT['wikipedia'])
+    results['task_success_rate']['hop2-4'] = (scores['normal']['task_success_rate'] * MMINA_DICT['normal'] + scores['compare']['task_success_rate'] * MMINA_DICT['compare']) / (MMINA_DICT['normal'] + MMINA_DICT['compare'])
+    results['task_success_rate']['hop5+'] = (scores['multi567']['task_success_rate'] * MMINA_DICT['multi567'] + scores['multipro']['task_success_rate'] * MMINA_DICT['multipro']) / (MMINA_DICT['multi567'] + MMINA_DICT['multipro'])
+    
+    results['hop_success_rate']['hop1'] = results['task_success_rate']['hop1']
+    results['hop_success_rate']['hop2-4'] = (scores['normal']['hop_success_rate'].split('/')[0] + scores['compare']['hop_success_rate'].split('/')[0]) / (scores['normal']['hop_success_rate'].split('/')[1] + scores['compare']['hop_success_rate'].split('/')[1])
+    results['hop_success_rate']['hop5+'] = (scores['multi567']['hop_success_rate'].split('/')[0] + scores['multipro']['hop_success_rate'].split('/')[0]) / (scores['multi567']['hop_success_rate'].split('/')[1] + scores['multipro']['hop_success_rate'].split('/')[1])
+    
+    # Save to JSON file
+    json_path = scores_dir / "results.json"
+    with open(json_path, 'w') as f:
+        json.dump(results, f, indent=4)
+            
+    logger.info(f"Results saved to {json_path}")
+
 @beartype
 def dump_config(args: argparse.Namespace) -> None:
     config_file = Path(args.result_dir) / "config.json"
@@ -586,15 +635,17 @@ if __name__ == "__main__":
     
     # Prepare test file list
     test_file_list = []
+    assert args.domain in ['full', 'shopping', 'wikipedia', 'normal', 'multi567', 'compare', 'multipro'], f"Invalid domain {args.domain}"
+    task_num = MMINA_DICT[args.domain]
     
-    assert args.domain in ['full', 'normal', 'multi567', 'compare', 'multipro', 'shopping', 'wikipedia'], f"Invalid domain {args.domain}"
     if args.domain == 'full':
-        task_num = 1050
+        for domain in ['shopping', 'wikipedia', 'normal', 'multi567', 'compare', 'multipro']:
+            sub_task_num = MMINA_DICT[domain]
+            for i in range(sub_task_num):
+                test_file_list.append(f"mmina/{domain}/{i+1}.json")
     else:
-        task_num = MMINA_DICT[args.domain]
-    for i in range(task_num):
-        # test_file_list.append(f"config_files/{i}.json")
-        test_file_list.append(f"mmina/{args.domain}/{i+1}.json")
+        test_file_list = [f"mmina/{args.domain}/{i+1}.json" for i in range(task_num)]
+    
     # test_file_list = get_unfinished(test_file_list, args.result_dir)
     logger.info(f"Total {len(test_file_list)} tasks left")
     
